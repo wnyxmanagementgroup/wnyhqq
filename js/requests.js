@@ -279,7 +279,7 @@ async function fetchUserRequests() {
 }
 
 // ==========================================
-// 2. ฟังก์ชันแสดงผล (Render UI) - ปรับลำดับการเลือกไฟล์
+// 2. ฟังก์ชันแสดงผล (Render UI) - ปรับปรุงปุ่มแก้ไขรายการที่ส่งแล้ว
 // ==========================================
 function renderUserRequests(requests) {
     const container = document.getElementById('user-requests-list');
@@ -317,59 +317,99 @@ function renderUserRequests(requests) {
     container.innerHTML = requests.map(req => {
         const safeId = escapeHtml(req.id || 'รอเลขที่');
         
-        // Badge สถานะ
-        let statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600">รอตรวจสอบ</span>`;
-        if (req.commandStatus === 'เสร็จสิ้น' || req.commandPdfUrl) {
-            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
+        // --- ตรวจสอบสถานะและไฟล์ ---
+        const completedMemoUrl = req.completedMemoUrl; // ไฟล์สมบูรณ์ (ส่งแล้ว)
+        const draftMemoUrl = req.fileUrl || req.pdfUrl; // ไฟล์ร่าง
+        const completedCommandUrl = req.completedCommandUrl || req.commandPdfUrl || req.commandBookUrl;
+        const dispatchBookUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
+
+        // --- สถานะหลัก ---
+        const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
+        const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
+        
+        // --- Logic: ต้องส่งบันทึกหรือไม่? ---
+        const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
+
+        // --- 1. Badge สถานะ ---
+        let statusBadge = '';
+        if (completedCommandUrl) {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
+        } else if (isCompleted) {
+             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">☑️ ส่งแล้ว (รอคำสั่ง)</span>`;
         } else if (req.status === 'ไม่อนุมัติ') {
-            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">❌ ไม่อนุมัติ</span>`;
-        } else if (req.status === 'Pending') {
-            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-yellow-100 text-yellow-700">⏳ รอตรวจสอบ</span>`;
-        } else if (req.status === 'นำกลับไปแก้ไข') {
-            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700">⚠️ ต้องแก้ไข</span>`;
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700 border border-red-200">❌ ไม่อนุมัติ</span>`;
+        } else if (isFixing) {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-red-100 text-red-700 border border-red-200 animate-pulse font-bold">⚠️ ตีกลับ/ต้องแก้ไข</span>`;
+        } else if (needsToSend) {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-orange-100 text-orange-700 border border-orange-200 font-bold">⏳ รอยืนยันการส่ง</span>`;
+        } else {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">... กำลังดำเนินการ</span>`;
         }
 
-        // ปุ่ม Action
+        // --- 2. Action Buttons ---
         let actionButtons = '';
 
-        // ★★★ (สำคัญ) เลือก fileUrl (Cloud Run) เป็นอันดับแรก ★★★
-        // เรียงลำดับ: ไฟล์สมบูรณ์ > ไฟล์ Cloud Run > ไฟล์ GAS
-        const finalPdfUrl = req.completedMemoUrl || req.fileUrl || req.pdfUrl;
-
-        // 1. บันทึกข้อความ
-        if (finalPdfUrl) {
+        // [A] ปุ่มส่งบันทึก (แสดงเมื่อต้องส่ง พร้อม Effect กระพริบ)
+        if (needsToSend) {
             actionButtons += `
-                <a href="${finalPdfUrl}" target="_blank" class="btn bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 btn-sm flex items-center gap-1 shadow-sm">
-                    📄 บันทึกข้อความ
+                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
+                    <span>📤</span> ส่งบันทึก/แนบไฟล์
+                </button>`;
+        }
+        // [NEW] ปุ่มแก้ไข (แสดงเมื่อส่งแล้ว แต่ยังไม่มีคำสั่ง) -> เข้าไปแก้ไขข้อมูลได้
+        else if (completedMemoUrl && !completedCommandUrl) {
+            actionButtons += `
+                <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
+                    ✏️ แก้ไขรายการที่ส่ง
+                </button>`;
+        }
+
+        // [B] ปุ่มดูไฟล์สมบูรณ์ (แสดงเมื่อส่งแล้ว)
+        if (completedMemoUrl) {
+            actionButtons += `
+                <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
+                    📄 ดูบันทึก
+                </a>`;
+        } else if (draftMemoUrl && !isCompleted) {
+            // ปุ่มพิมพ์ร่าง (ถ้ายังไม่ส่ง)
+            actionButtons += `
+                <a href="${draftMemoUrl}" target="_blank" class="btn bg-white text-gray-600 hover:bg-gray-50 border border-gray-300 btn-sm flex items-center gap-1 shadow-sm">
+                    🖨️ พิมพ์ร่าง
                 </a>`;
         }
 
-        // 2. คำสั่ง
-        const finalCommandUrl = req.completedCommandUrl || req.commandPdfUrl;
-        if (finalCommandUrl) {
+        // [C] ปุ่มคำสั่ง (ถ้ามี)
+        if (completedCommandUrl) {
             actionButtons += `
-                <a href="${finalCommandUrl}" target="_blank" class="btn bg-green-50 text-green-600 hover:bg-green-100 border border-green-200 btn-sm flex items-center gap-1 shadow-sm">
+                <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
                     📋 คำสั่ง
                 </a>`;
         }
 
-        // 3. หนังสือส่ง
-        const dispatchUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
-        if (dispatchUrl) {
+        // [D] ปุ่มหนังสือส่ง (ถ้ามี)
+        if (dispatchBookUrl) {
             actionButtons += `
-                <a href="${dispatchUrl}" target="_blank" class="btn bg-purple-50 text-purple-600 hover:bg-purple-100 border border-purple-200 btn-sm flex items-center gap-1 shadow-sm">
+                <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
                     📦 หนังสือส่ง
                 </a>`;
         }
 
-        // เงื่อนไขปุ่มแก้ไข (ถ้ายังไม่ออกคำสั่ง หรือโดนส่งคืน)
-        const canEdit = (!req.commandPdfUrl && !req.commandStatus) || req.status === 'นำกลับไปแก้ไข';
+        // --- 3. เงื่อนไขการแก้ไข/ลบ ---
+        // อนุญาตให้แก้ไขได้ตราบใดที่ "ยังไม่มีคำสั่ง" (แม้จะส่งบันทึกแล้วก็ตาม)
+        const canEdit = !completedCommandUrl;
+
+        // กำหนดสีขอบซ้ายตามสถานะ
+        let borderClass = 'border-l-gray-300';
+        if (completedCommandUrl) borderClass = 'border-l-green-500';
+        else if (isCompleted) borderClass = 'border-l-blue-500';
+        else if (needsToSend) borderClass = 'border-l-orange-500';
+        else if (isFixing) borderClass = 'border-l-red-500';
 
         return `
-        <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition duration-200 mb-4">
+        <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 hover:shadow-md transition duration-200 mb-4 border-l-4 ${borderClass}">
             <div class="flex flex-col md:flex-row justify-between gap-4">
                 <div class="flex-1">
-                    <div class="flex items-center gap-3 mb-2">
+                    <div class="flex items-center gap-3 mb-2 flex-wrap">
                         <h4 class="font-bold text-indigo-700 text-lg">${safeId}</h4>
                         ${statusBadge}
                     </div>
@@ -378,16 +418,18 @@ function renderUserRequests(requests) {
                         <p><strong>สถานที่:</strong> ${escapeHtml(req.location)}</p>
                         <p><strong>วันที่:</strong> ${formatDate(req.startDate)} - ${formatDate(req.endDate)}</p>
                     </div>
+                    ${needsToSend ? `<p class="text-xs text-orange-600 mt-2 font-bold flex items-center gap-1">👉 กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันข้อมูลเข้าระบบ</p>` : ''}
                 </div>
                 
-                <div class="flex flex-col items-end gap-2 min-w-[160px]">
-                    <div class="flex flex-wrap justify-end gap-2 w-full">
+                <div class="flex flex-col items-end gap-3 min-w-[200px]">
+                    <div class="flex flex-col gap-2 w-full items-end">
                         ${actionButtons}
                     </div>
+                    
                     ${canEdit ? `
-                        <div class="flex gap-2 mt-2 pt-2 border-t border-gray-100 w-full justify-end">
-                            <button onclick="editRequest('${safeId}')" class="text-xs text-indigo-500 hover:text-indigo-700 underline flex items-center gap-1">✏️ แก้ไข</button>
-                            <button onclick="deleteRequest('${safeId}')" class="text-xs text-red-500 hover:text-red-700 underline flex items-center gap-1">🗑️ ยกเลิก</button>
+                        <div class="flex gap-3 mt-1 pt-2 border-t border-gray-100 w-full justify-end">
+                            ${!isCompleted ? `<button onclick="editRequest('${safeId}')" class="text-xs text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded">✏️ แก้ไข</button>` : ''}
+                            <button onclick="deleteRequest('${safeId}')" class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 bg-red-50 px-2 py-1 rounded">🗑️ ยกเลิก</button>
                         </div>` : ''
                     }
                 </div>
@@ -395,9 +437,6 @@ function renderUserRequests(requests) {
         </div>`;
     }).join('');
 }
-// ... (ส่วนล่าง renderRequestsList และอื่นๆ คงเดิม) ...
-
-// ไฟล์ js/requests.js
 
 function renderRequestsList(requests, memos, searchTerm = '') {
     const container = document.getElementById('requests-list');

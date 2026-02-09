@@ -826,10 +826,16 @@ async function mergeFilesToSinglePDF(files) {
 }
 
 // 2. ฟังก์ชันหลักสำหรับส่งบันทึกจาก Modal (รวมไฟล์แล้วอัปโหลด)
+// ==========================================
+// 2. ฟังก์ชันหลักสำหรับส่งบันทึกจาก Modal (ปรับปรุง: Admin Bypass File)
+// ==========================================
 async function handleMemoSubmitFromModal(e) {
     e.preventDefault();
     const user = getCurrentUser();
     if (!user) return;
+
+    // ตรวจสอบสิทธิ์ Admin
+    const isAdmin = user.role === 'admin';
 
     const requestId = document.getElementById('memo-modal-request-id').value;
     
@@ -843,80 +849,94 @@ async function handleMemoSubmitFromModal(e) {
         let finalFileUrlForAdmin = ""; 
 
         if (memoType === 'non_reimburse') {
-            // --- ดึงไฟล์จาก Input (ตาม ID ใหม่) ---
-            // ใช้ Optional Chaining (?.) เพื่อกัน Error ถ้าหา Element ไม่เจอ
-            const fileSigned = document.getElementById('file-signed-memo')?.files[0]; // 1. ลงนาม
-            const fileExchange = document.getElementById('file-exchange')?.files[0];  // 2. แลกคาบ
-            const fileRef = document.getElementById('file-ref-doc')?.files[0];        // 3. ต้นเรื่อง
-            const fileOther = document.getElementById('file-other')?.files[0];        // 4. อื่นๆ
+            // --- ดึงไฟล์จาก Input ---
+            const fileSigned = document.getElementById('file-signed-memo')?.files[0]; 
+            const fileExchange = document.getElementById('file-exchange')?.files[0];  
+            const fileRef = document.getElementById('file-ref-doc')?.files[0];        
+            const fileOther = document.getElementById('file-other')?.files[0];        
 
-            // ตรวจสอบไฟล์บังคับ (1, 2, 3)
-            if (!fileSigned || !fileExchange || !fileRef) {
-                throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. ไฟล์แลกคาบสอน\n3. หนังสือต้นเรื่อง");
-            }
-
-            // --- รวมไฟล์ทั้งหมดเป็นไฟล์เดียว (Merge) ---
-            // เรียงลำดับ: ลงนาม -> แลกคาบ -> ต้นเรื่อง -> อื่นๆ
+            // กรองไฟล์ที่มีจริง
             const filesToMerge = [fileSigned, fileExchange, fileRef, fileOther].filter(f => f); 
+
+            // --- 1. ตรวจสอบเงื่อนไข (Validation) ---
+            // ถ้าไม่ใช่ Admin ต้องแนบไฟล์ครบ
+            // ถ้าเป็น Admin แต่ไม่มีไฟล์เลย ก็ให้ผ่านได้ (Bypass)
+            // ถ้าเป็น Admin และมีการแนบไฟล์มาบางส่วน ก็ให้รวมไฟล์ตามปกติ
             
-            // เปลี่ยนข้อความปุ่มเพื่อแจ้งสถานะ
-            const btn = document.getElementById('send-memo-submit-button');
-            const originalBtnText = btn.innerHTML;
-            btn.innerHTML = '<div class="loader"></div> กำลังรวมไฟล์ PDF...';
-
-            // เรียกฟังก์ชันรวมไฟล์
-            const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
-
-            // --- อัปโหลดไฟล์ที่รวมเสร็จแล้ว ---
-            btn.innerHTML = '<div class="loader"></div> กำลังอัปโหลด...';
-            
-            // แปลง Blob เป็น Base64 เพื่อส่งผ่าน API
-            const mergedBase64 = await blobToBase64(mergedPdfBlob);
-            
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: mergedBase64,
-                filename: `Complete_Memo_${requestId.replace(/[\/\\:\.]/g, '-')}.pdf`,
-                mimeType: 'application/pdf',
-                username: user.username,
-                requestId: requestId
-            });
-
-            if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + uploadRes.message);
-            
-            finalFileUrlForAdmin = uploadRes.url;
-
-            // --- บันทึกลิงก์ลง Database ---
-            await apiCall('POST', 'updateRequest', {
-                requestId: requestId,
-                completedMemoUrl: finalFileUrlForAdmin 
-            });
-
-            if (typeof db !== 'undefined') {
-                const docId = requestId.replace(/[\/\\:\.]/g, '-');
-                await db.collection('requests').doc(docId).set({
-                    completedMemoUrl: finalFileUrlForAdmin,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+            if (!isAdmin) {
+                if (!fileSigned || !fileExchange || !fileRef) {
+                    throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. ไฟล์แลกคาบสอน\n3. หนังสือต้นเรื่อง");
+                }
             }
-            
-            // คืนค่าข้อความปุ่ม
-            btn.innerHTML = originalBtnText;
 
-        } else {
-            // กรณีเบิกเงิน (ส่งเอกสารจริง)
-        }
+            // --- 2. รวมไฟล์และอัปโหลด (ถ้ามีไฟล์) ---
+            if (filesToMerge.length > 0) {
+                // เปลี่ยนข้อความปุ่ม
+                const btn = document.getElementById('send-memo-submit-button');
+                const originalBtnText = btn.innerHTML;
+                btn.innerHTML = '<div class="loader"></div> กำลังรวมไฟล์ PDF...';
+
+                // เรียกฟังก์ชันรวมไฟล์
+                const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
+
+                // --- อัปโหลดไฟล์ ---
+                btn.innerHTML = '<div class="loader"></div> กำลังอัปโหลด...';
+                
+                const mergedBase64 = await blobToBase64(mergedPdfBlob);
+                
+                const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+                    data: mergedBase64,
+                    filename: `Complete_Memo_${requestId.replace(/[\/\\:\.]/g, '-')}.pdf`,
+                    mimeType: 'application/pdf',
+                    username: user.username,
+                    requestId: requestId
+                });
+
+                if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + uploadRes.message);
+                
+                finalFileUrlForAdmin = uploadRes.url;
+                
+                // คืนค่าปุ่ม
+                btn.innerHTML = originalBtnText;
+
+            } else if (isAdmin) {
+                console.log("🛡️ Admin Bypass: ส่งบันทึกโดยไม่มีไฟล์แนบ");
+                // กรณี Admin ไม่แนบไฟล์ ระบบจะข้ามขั้นตอน Merge/Upload
+                // finalFileUrlForAdmin จะเป็นค่าว่าง ""
+            }
+
+            // --- 3. บันทึกลิงก์ลง Database (ถ้ามี URL) ---
+            if (finalFileUrlForAdmin) {
+                await apiCall('POST', 'updateRequest', {
+                    requestId: requestId,
+                    completedMemoUrl: finalFileUrlForAdmin 
+                });
+
+                if (typeof db !== 'undefined') {
+                    const docId = requestId.replace(/[\/\\:\.]/g, '-');
+                    await db.collection('requests').doc(docId).set({
+                        completedMemoUrl: finalFileUrlForAdmin,
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                }
+            }
+        } 
 
         // --- ส่งสถานะ "Submitted" ไปยังระบบ ---
         const result = await apiCall('POST', 'uploadMemo', { 
             refNumber: requestId, 
             file: null, 
-            fileUrl: finalFileUrlForAdmin, 
+            fileUrl: finalFileUrlForAdmin, // ถ้า Admin ไม่แนบ ค่านี้จะเป็น "" ซึ่ง backend ควรรับได้
             username: user.username, 
-            memoType: memoType 
+            memoType: memoType,
+            isAdminBypass: isAdmin // (Optional) ส่ง Flag บอก Backend ว่าเป็นการ Bypass
         });
 
         if (result.status === 'success') { 
-            showAlert('สำเร็จ', 'รวมไฟล์และส่งบันทึกข้อความเรียบร้อยแล้ว'); 
+            showAlert('สำเร็จ', isAdmin && !finalFileUrlForAdmin 
+                ? 'อัปเดตสถานะเรียบร้อยแล้ว (Admin Bypass)' 
+                : 'รวมไฟล์และส่งบันทึกข้อความเรียบร้อยแล้ว'); 
+            
             document.getElementById('send-memo-modal').style.display = 'none'; 
             document.getElementById('send-memo-form').reset(); 
             

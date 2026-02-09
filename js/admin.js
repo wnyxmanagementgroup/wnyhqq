@@ -247,6 +247,9 @@ async function handleAdminGenerateCommand() {
 
 // --- RENDER FUNCTIONS ---
 // --- แก้ไขจุดที่ 2: เพิ่มปุ่มหนังสือส่งให้แสดงตลอดเวลา ---
+// ==========================================
+// RENDER FUNCTIONS - เพิ่มปุ่ม "ส่งบันทึกแทน" ให้แอดมิน
+// ==========================================
 function renderAdminRequestsList(requests) {
     const container = document.getElementById('admin-requests-list');
     
@@ -279,21 +282,14 @@ function renderAdminRequestsList(requests) {
         
         let peopleCategory = totalPeople === 1 ? "คำสั่งเดี่ยว" : (totalPeople <= 5 ? "คำสั่งกลุ่มเล็ก" : "คำสั่งกลุ่มใหญ่");
         
-        // --- ★★★ ส่วนที่เพิ่มใหม่: Logic แสดงสถานะเบิกจ่าย ★★★ ---
+        // --- Badge สถานะเบิกจ่าย ---
         let expenseBadge = '';
         if (request.expenseOption === 'partial') {
-            // กรณีเบิก: แสดงจำนวนเงินด้วย (ใส่ลูกน้ำคั่นหลักพัน)
             const amount = request.totalExpense ? Number(request.totalExpense).toLocaleString() : '0';
-            expenseBadge = `<span class="ml-2 px-2 py-0.5 rounded text-xs bg-teal-100 text-teal-800 border border-teal-200 font-bold whitespace-nowrap">
-                                💸 เบิกงบ (${amount} บ.)
-                            </span>`;
+            expenseBadge = `<span class="ml-2 px-2 py-0.5 rounded text-xs bg-teal-100 text-teal-800 border border-teal-200 font-bold whitespace-nowrap">💸 เบิกงบ (${amount} บ.)</span>`;
         } else {
-            // กรณีไม่เบิก
-            expenseBadge = `<span class="ml-2 px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">
-                                ⛔ ไม่เบิก
-                            </span>`;
+            expenseBadge = `<span class="ml-2 px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">⛔ ไม่เบิก</span>`;
         }
-        // -----------------------------------------------------
 
         const safeId = escapeHtml(request.id);
         const safeName = escapeHtml(request.requesterName);
@@ -301,25 +297,36 @@ function renderAdminRequestsList(requests) {
         const safeLocation = escapeHtml(request.location);
         const safeDate = `${formatDisplayDate(request.startDate)} - ${formatDisplayDate(request.endDate)}`;
 
-        // --- ปุ่มหนังสือส่ง (คงเดิม) ---
+        // --- ปุ่มหนังสือส่ง ---
         const dispatchUrl = request.dispatchBookUrl || request.dispatchBookPdfUrl;
         let dispatchButtonHtml = '';
-        
         if (dispatchUrl) {
             dispatchButtonHtml = `
                 <div class="flex gap-1">
-                    <a href="${dispatchUrl}" target="_blank" class="btn bg-purple-600 hover:bg-purple-700 text-white btn-sm flex items-center gap-1 shadow-sm px-2" title="ดูไฟล์ PDF">
-                        📦 ดู
-                    </a>
-                    <button onclick="openDispatchModal('${safeId}')" class="btn bg-purple-100 hover:bg-purple-200 text-purple-700 btn-sm flex items-center gap-1 shadow-sm px-2 border border-purple-300" title="แก้ไขหนังสือส่ง">
-                        ✏️ แก้ไข
-                    </button>
+                    <a href="${dispatchUrl}" target="_blank" class="btn bg-purple-600 hover:bg-purple-700 text-white btn-sm flex items-center gap-1 shadow-sm px-2" title="ดูไฟล์ PDF">📦 ดู</a>
+                    <button onclick="openDispatchModal('${safeId}')" class="btn bg-purple-100 hover:bg-purple-200 text-purple-700 btn-sm flex items-center gap-1 shadow-sm px-2 border border-purple-300" title="แก้ไขหนังสือส่ง">✏️</button>
                 </div>`;
         } else {
             dispatchButtonHtml = `
                 <button onclick="openDispatchModal('${safeId}')" class="btn bg-purple-500 hover:bg-purple-600 text-white btn-sm flex items-center gap-1 shadow-sm px-3">
                     📦 ออกหนังสือส่ง
                 </button>`;
+        }
+
+        // --- [NEW] ปุ่มส่งบันทึกแทน (สำหรับ Admin) ---
+        // แสดงเมื่อยังไม่มีไฟล์บันทึกสมบูรณ์
+        let adminMemoBtn = '';
+        if (!request.completedMemoUrl) {
+            adminMemoBtn = `
+                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-1 shadow-sm px-3 animate-pulse">
+                    📤 ส่งบันทึกแทน
+                </button>`;
+        } else {
+            // ถ้ามีแล้ว ให้แสดงปุ่มดูไฟล์แทน
+             adminMemoBtn = `
+                <a href="${request.completedMemoUrl}" target="_blank" class="btn bg-blue-500 hover:bg-blue-600 text-white btn-sm flex items-center gap-1 shadow-sm px-3">
+                    📄 ดูบันทึก
+                </a>`;
         }
 
         let commandActionButtons = '';
@@ -338,7 +345,7 @@ function renderAdminRequestsList(requests) {
         } else {
             commandActionButtons = `
                 <div class="flex flex-wrap gap-2 justify-end mt-2 md:mt-0">
-                    ${dispatchButtonHtml}
+                    ${adminMemoBtn} ${dispatchButtonHtml}
                     <button onclick="openAdminGenerateCommand('${safeId}')" class="btn bg-green-500 hover:bg-green-600 text-white btn-sm shadow-sm w-full md:w-auto">
                         ✅ ออกคำสั่ง (${peopleCategory})
                     </button>
