@@ -958,3 +958,46 @@ async function handleMemoSubmitFromModal(e) {
         toggleLoader('send-memo-submit-button', false);
     }
 }
+// ในไฟล์ js/main.js
+
+function updateSidebarForRole(user) {
+    // รายการ ID ของเมนู User ทั่วไป
+    const userMenus = ['nav-dashboard', 'nav-create-request', 'nav-create-memo'];
+    // รายการ ID ของเมนู Admin
+    const adminMenus = ['nav-admin-panel'];
+
+    if (user.username === 'admin') {
+        // --- กรณีเป็น Admin ---
+        // 1. ซ่อนเมนู User
+        userMenus.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+
+        // 2. แสดงเมนู Admin
+        adminMenus.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'block'; // หรือ 'flex' แล้วแต่ CSS
+        });
+
+        // 3. บังคับเปลี่ยนหน้าไปที่ Admin Panel ทันที
+        switchPage('admin-panel'); 
+
+    } else {
+        // --- กรณีเป็น User ทั่วไป ---
+        // 1. แสดงเมนู User
+        userMenus.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'block';
+        });
+
+        // 2. ซ่อนเมนู Admin
+        adminMenus.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        });
+        
+        // 3. ไปหน้า Dashboard
+        switchPage('dashboard');
+    }
+}

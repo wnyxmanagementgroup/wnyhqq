@@ -202,9 +202,14 @@ async function fetchUserRequests() {
     const container = document.getElementById('user-requests-list');
     const noMsg = document.getElementById('no-requests-message');
     
+    // ★ แสดงสถานะกำลังโหลด
     if (container) {
         container.classList.remove('hidden');
-        container.innerHTML = '<div class="text-center py-10"><span class="loader"></span> กำลังโหลดข้อมูลล่าสุด...</div>';
+        container.innerHTML = `
+            <div class="flex flex-col items-center justify-center py-10">
+                <span class="loader mb-3"></span>
+                <p class="text-gray-500 animate-pulse">กำลังดึงข้อมูลล่าสุด...</p>
+            </div>`;
     }
     if (noMsg) noMsg.classList.add('hidden');
 
@@ -221,10 +226,9 @@ async function fetchUserRequests() {
 
         let requests = (result.status === 'success') ? result.data || [] : [];
 
-        // 2. ★★★ (สำคัญ) ดึงข้อมูลจาก Firebase มาทับ เพื่อให้ได้ลิงก์ Cloud Run ล่าสุด ★★★
+        // 2. ดึงข้อมูลจาก Firebase มาทับ (เพื่อให้ได้ลิงก์ล่าสุดแบบ Real-time)
         if (typeof db !== 'undefined') {
             try {
-                // ดึงเฉพาะของ User นี้
                 const snapshot = await db.collection('requests')
                     .where('username', '==', user.username)
                     .get();
@@ -233,18 +237,17 @@ async function fetchUserRequests() {
                 snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
                 requests = requests.map(req => {
-                    // แปลง ID ให้ตรงกับ Key ใน Firebase (เช่น บค/ -> บค-)
                     const safeId = req.id.replace(/[\/\\:\.]/g, '-');
                     const fbDoc = firebaseData[safeId];
                     
                     if (fbDoc) {
                         return {
                             ...req,
-                            // เอาลิงก์ fileUrl (Cloud Run) จาก Firebase มาใช้ก่อน
+                            // ใช้ลิงก์ล่าสุดจาก Firebase เสมอ
                             fileUrl: fbDoc.fileUrl || req.fileUrl,
                             pdfUrl: fbDoc.pdfUrl || req.pdfUrl,
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl, // เพิ่มตัวนี้ด้วย
                             
-                            // เอาลิงก์อื่นๆ และสถานะล่าสุดมาด้วย
                             completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
@@ -255,7 +258,7 @@ async function fetchUserRequests() {
                     return req;
                 });
             } catch (e) {
-                console.warn("Firebase Sync Error (User):", e);
+                console.warn("Firebase Sync Error:", e);
             }
         }
 
@@ -317,19 +320,15 @@ function renderUserRequests(requests) {
     container.innerHTML = requests.map(req => {
         const safeId = escapeHtml(req.id || 'รอเลขที่');
         
-        // --- ตรวจสอบสถานะและไฟล์ ---
-        const completedMemoUrl = req.completedMemoUrl; // ไฟล์สมบูรณ์ (ส่งแล้ว)
-        const draftMemoUrl = req.fileUrl || req.pdfUrl; // ไฟล์ร่าง
+        // ลิงก์ไฟล์ต่างๆ
+        const completedMemoUrl = req.completedMemoUrl; 
+        const draftMemoUrl = req.fileUrl || req.pdfUrl || req.memoPdfUrl; // ลิงก์ไฟล์ที่สร้างจากการแก้ไขจะอยู่ที่นี่
         const completedCommandUrl = req.completedCommandUrl || req.commandPdfUrl || req.commandBookUrl;
         const dispatchBookUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
 
-        // --- สถานะหลัก ---
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-        
-        // --- Logic: ต้องส่งบันทึกหรือไม่? ---
         const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
-
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (completedCommandUrl) {
@@ -346,17 +345,16 @@ function renderUserRequests(requests) {
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 border border-gray-200">... กำลังดำเนินการ</span>`;
         }
 
-        // --- 2. Action Buttons ---
+        // --- Action Buttons ---
         let actionButtons = '';
 
-        // [A] ปุ่มส่งบันทึก (แสดงเมื่อต้องส่ง พร้อม Effect กระพริบ)
+        // ปุ่มส่งบันทึก
         if (needsToSend) {
             actionButtons += `
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
                     <span>📤</span> ส่งบันทึก/แนบไฟล์
                 </button>`;
         }
-        // [NEW] ปุ่มแก้ไข (แสดงเมื่อส่งแล้ว แต่ยังไม่มีคำสั่ง) -> เข้าไปแก้ไขข้อมูลได้
         else if (completedMemoUrl && !completedCommandUrl) {
             actionButtons += `
                 <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
@@ -364,20 +362,20 @@ function renderUserRequests(requests) {
                 </button>`;
         }
 
-        // [B] ปุ่มดูไฟล์สมบูรณ์ (แสดงเมื่อส่งแล้ว)
+        // ปุ่มดูไฟล์
         if (completedMemoUrl) {
+            // กรณีส่งเสร็จแล้ว
             actionButtons += `
                 <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
-                    📄 ดูบันทึก
+                    📄 ดูบันทึก (ฉบับส่ง)
                 </a>`;
         } else if (draftMemoUrl && !isCompleted) {
-            // ปุ่มพิมพ์ร่าง (ถ้ายังไม่ส่ง)
+            // ★★★ แก้ไขจุดนี้: เปลี่ยนจาก "พิมพ์ร่าง" เป็น "ดูบันทึก" เพื่อให้ตรงความต้องการ ★★★
             actionButtons += `
-                <a href="${draftMemoUrl}" target="_blank" class="btn bg-white text-gray-600 hover:bg-gray-50 border border-gray-300 btn-sm flex items-center gap-1 shadow-sm">
-                    🖨️ พิมพ์ร่าง
+                <a href="${draftMemoUrl}" target="_blank" class="btn bg-teal-600 text-white hover:bg-teal-700 border border-teal-200 btn-sm flex items-center gap-1 shadow-sm">
+                    📄 ดูบันทึก (ฉบับร่าง/แก้ไข)
                 </a>`;
         }
-
         // [C] ปุ่มคำสั่ง (ถ้ามี)
         if (completedCommandUrl) {
             actionButtons += `
@@ -1356,14 +1354,19 @@ function getRequestFormData() {
 // เพิ่มฟังก์ชัน wait ไว้ด้านบนสุดของไฟล์หรือนอก handleRequestFormSubmit
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ✅ [ฉบับแก้ไขสมบูรณ์] ขอเลขที่จริงก่อน -> สร้าง PDF -> อัปเดตลิงก์กลับ
+// --- ค้นหาฟังก์ชัน handleRequestFormSubmit แล้วแทนที่ด้วยโค้ดนี้ ---
+
 async function handleRequestFormSubmit(e) {
     e.preventDefault();
     
     const submitBtn = document.getElementById('submit-request-button');
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        submitBtn.innerHTML = '<span class="loader-sm"></span> กำลังขอเลขที่เอกสาร...';
-    }
+    // Helper function เปลี่ยนข้อความปุ่ม
+    const setBtnStatus = (msg) => {
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = `<span class="loader-sm"></span> ${msg}`;
+        }
+    };
 
     try {
         const formData = getRequestFormData();
@@ -1375,75 +1378,81 @@ async function handleRequestFormSubmit(e) {
         formData.username = user.username; 
         formData.status = 'Pending';
 
-        // --- ขั้นตอนที่ 1: จองเลขที่เอกสาร ---
-        const createResult = await apiCall('POST', 'createRequest', formData);
+        // --- Step 1: ขอเลขที่เอกสาร ---
+        setBtnStatus('กำลังขอเลขที่เอกสาร...');
+        
+        // ส่ง SKIP_GENERATION เพื่อให้ GAS ทำงานเร็วขึ้น (ไม่ต้องสร้างไฟล์สำรอง)
+        const createPayload = { ...formData, preGeneratedPdfUrl: 'SKIP_GENERATION' };
+        const createResult = await apiCall('POST', 'createRequest', createPayload);
+        
         if (createResult.status !== 'success') throw new Error(createResult.message || "ไม่สามารถขอเลขที่เอกสารได้");
-
         const realId = createResult.id || createResult.data?.id;
         if (!realId) throw new Error("Server ไม่ได้ส่งเลขที่เอกสารกลับมา");
+        
+        console.log("✅ ได้รับเลขที่:", realId);
 
-        // ** หน่วงเวลาเพื่อให้ Server/Database พร้อมสำหรับการ Query **
-        console.log("⏳ Waiting for Server to index Real ID...");
-        await wait(2000);
-
-        // --- ขั้นตอนที่ 2: สร้าง PDF ---
-        if (submitBtn) submitBtn.innerHTML = '<span class="loader-sm"></span> กำลังสร้างเอกสาร PDF...';
+        // --- Step 2: สร้าง PDF จาก Cloud Run ---
+        setBtnStatus('กำลังสร้างไฟล์ PDF...');
         
         const pdfData = { 
             ...formData, 
-            id: realId,
-            requestId: realId,
+            id: realId, 
+            requestId: realId, 
             doctype: 'memo' 
         };
-        
         const { pdfBlob } = await generateOfficialPDF(pdfData);
 
-        // --- ขั้นตอนที่ 3: อัปโหลดไฟล์ ---
-        if (submitBtn) submitBtn.innerHTML = '<span class="loader-sm"></span> กำลังอัปโหลดไฟล์...';
+        // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
+        setBtnStatus('กำลังบันทึกไฟล์...');
         
         const finalBase64 = await blobToBase64(pdfBlob);
-
-        if (!finalBase64) throw new Error("เกิดข้อผิดพลาดในการแปลงไฟล์ PDF");
-
         const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-'); 
         const safeFilename = `memo_${safeIdForFile}.pdf`;
 
-        // ** เพิ่ม requestId เข้าไปใน payload เพื่อให้ฝั่ง Server รู้ว่าต้องผูกไฟล์กับรายการไหน **
         const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
             data: finalBase64,
             filename: safeFilename,
             mimeType: 'application/pdf',
             username: user.username,
-            requestId: realId // สำคัญ: เพื่อป้องกัน "No item with given ID"
+            requestId: realId
         });
 
         if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + uploadRes.message);
-
         const finalFileUrl = uploadRes.url;
 
-        // --- ขั้นตอนที่ 4: อัปเดตข้อมูลกลับฐานข้อมูล ---
-        await apiCall('POST', 'updateRequest', {
-            requestId: realId,
-            fileUrl: finalFileUrl
-        });
+        // --- Step 4: อัปเดตลิงก์กลับฐานข้อมูล ---
+        setBtnStatus('กำลังปรับปรุงฐานข้อมูล...');
 
-        // อัปเดต Firebase
+        const updatePayload = {
+            requestId: realId,
+            fileUrl: finalFileUrl,      
+            pdfUrl: finalFileUrl,
+            memoPdfUrl: finalFileUrl, 
+            status: 'Pending'
+        };
+
+        // 4.1 อัปเดต Google Sheet
+        await apiCall('POST', 'updateRequest', updatePayload);
+
+        // 4.2 อัปเดต Firebase (เพื่อให้ Dashboard เห็นทันที)
         if (typeof db !== 'undefined') {
             const docId = realId.replace(/[\/\\\:\.]/g, '-');
             await db.collection('requests').doc(docId).set({
-                ...formData,
+                ...formData, 
+                ...updatePayload,
                 id: realId,
-                fileUrl: finalFileUrl,
-                status: 'Pending',
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
         }
 
+        // เปิดไฟล์ให้ดู
         if (finalFileUrl) window.open(finalFileUrl, '_blank');
 
         showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
         
         resetRequestForm();
+        
+        // ล้าง Cache และโหลดใหม่ทันที
         if (typeof clearRequestsCache === 'function') clearRequestsCache();
         await fetchUserRequests();
         switchPage('dashboard-page');
@@ -1458,6 +1467,8 @@ async function handleRequestFormSubmit(e) {
         }
     }
 }
+
+
 
 function tryAutoFillRequester(retry = 0) {
     const nameInput = document.getElementById('form-requester-name');
@@ -1833,95 +1844,95 @@ populateEditForm = async function(requestData) {
 
 
 // 5. ฟังก์ชันบันทึกการแก้ไขฉบับเต็ม (Save Edit Request - Full Function)
-// --- แก้ไขในไฟล์ js/requests.js ---
+
 async function saveEditRequest() {
     const btn = document.getElementById('save-edit-btn');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<span class="loader-sm"></span> กำลังบันทึก (ปิดแนบไฟล์)...';
-        btn.classList.add('opacity-70', 'cursor-not-allowed');
-    }
+    
+    const setBtnStatus = (msg, icon = 'loader-sm') => {
+        if (btn) {
+            btn.disabled = true;
+            // ถ้า icon เป็น loader ให้หมุน ถ้าไม่ใช่ให้แสดงปกติ
+            const iconHtml = icon === 'loader-sm' ? '<span class="loader-sm"></span>' : `<i class="${icon}"></i>`;
+            btn.innerHTML = `${iconHtml} ${msg}`;
+            btn.classList.add('opacity-70', 'cursor-not-allowed');
+        }
+    };
 
     try {
-        console.log("💾 Starting Save Edit (No Attachments Mode)...");
-
-        // 1. ดึงข้อมูล
         const formData = getEditFormData();
-        if (!formData || !validateEditForm(formData)) {
-            if (btn) {
-                btn.disabled = false;
-                btn.innerHTML = 'บันทึกการแก้ไข';
-                btn.classList.remove('opacity-70', 'cursor-not-allowed');
-            }
-            return;
-        }
+        if (!formData || !validateEditForm(formData)) return;
 
-        const user = getCurrentUser();
-        // const oldData = window.originalRequestDataForEdit || {}; // ไม่ได้ใช้ชั่วคราว
-
-        // =========================================================
-        // 🔒 ปิดการใช้งานส่วนแนบไฟล์ชั่วคราว
-        // =========================================================
-        console.log("ℹ️ Attachment updates are temporarily disabled.");
-
-        /*
-        // --- โค้ดเดิมที่ปิดไว้ ---
-        const uploadIfNeeded = async (...) => { ... };
-        if (formData.expenseOption === 'no') { ... } 
-        const fileInput = document.getElementById('edit-attachment-input');
-        // ... Upload Loop ...
-        const allAttachments = [...];
-        formData.attachments = allAttachments;
-        const attachmentsForCloudRun = [...];
-        formData.attachmentUrls = attachmentsForCloudRun;
-        */
-
-        // ใช้ค่าว่าง หรือค่าเดิมที่มีอยู่ (แต่ไม่ส่งไปรวมไฟล์ใหม่)
-        // หมายเหตุ: การทำแบบนี้จะทำให้ไฟล์แนบเก่า "ยังคงอยู่ใน DB" แต่ "ไม่ถูกรวมใน PDF ใหม่"
+        // --- Step 1: สร้าง PDF ใหม่ ---
+        setBtnStatus('กำลังสร้างไฟล์ PDF ใหม่...');
+        
+        // บังคับปิด attachments (ตาม Logic เดิม)
         formData.attachments = []; 
-        formData.attachmentUrls = []; // บังคับไม่ให้ Cloud Run รวมไฟล์
+        formData.attachmentUrls = [];
 
-        // =========================================================
-
-        // 2. สร้าง PDF ใหม่ (Main Only)
-        console.log("☁️ Regenerating Document (Main Only)...");
         const pdfData = { ...formData, doctype: 'memo' };
         const { pdfBlob } = await generateOfficialPDF(pdfData);
 
-        // 3. อัปโหลดผลลัพธ์ใหม่
-        const finalPdfBase64 = await blobToBase64(pdfBlob);
+        // --- Step 2: อัปโหลดไฟล์ ---
+        setBtnStatus('กำลังอัปโหลดไฟล์...');
+        
+        const finalBase64 = await blobToBase64(pdfBlob);
+        const safeId = formData.requestId.replace(/[\/\\\:\.\s]/g, '-');
+        const filename = `memo_EDIT_${safeId}_${Date.now()}.pdf`;
+
         const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
             data: finalBase64,
-            filename: `request_edit_final_${Date.now()}.pdf`,
+            filename: filename,
             mimeType: 'application/pdf',
-            username: user.username
+            username: formData.username
         });
-        
-        if (uploadRes.status === 'success') {
-            formData.fileUrl = uploadRes.url;
-        }
 
-        // 4. อัปเดตข้อมูลในฐานข้อมูล
-        console.log("💾 Updating Database...");
+        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ");
+        const newFileUrl = uploadRes.url;
+        console.log("✅ New File URL:", newFileUrl);
+
+        // --- Step 3: บันทึกข้อมูล ---
+        setBtnStatus('กำลังบันทึกข้อมูล...');
+        
+        formData.fileUrl = newFileUrl;
+        formData.pdfUrl = newFileUrl;
+        formData.memoPdfUrl = newFileUrl;
+
         const result = await apiCall('POST', 'updateRequest', formData);
 
         if (result.status === 'success') {
+            // อัปเดต Firestore
             if (typeof db !== 'undefined') {
                 const docId = formData.requestId.replace(/[\/\\\:\.]/g, '-');
                 await db.collection('requests').doc(docId).set({
                     ...formData,
+                    fileUrl: newFileUrl,
+                    pdfUrl: newFileUrl,
+                    memoPdfUrl: newFileUrl,
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
             }
 
-            showAlert("สำเร็จ", "บันทึกข้อมูลเรียบร้อยแล้ว");
+            // ★★★ ส่วนที่ปรับปรุงตามโจทย์ ★★★
             
-            // ล้างค่า input
-            const fileInput = document.getElementById('edit-attachment-input');
-            if (fileInput) fileInput.value = '';
+            // 1. เปลี่ยนข้อความปุ่มให้รู้ว่าเสร็จแล้ว
+            if (btn) {
+                btn.innerHTML = '✅ ดูไฟล์ที่สร้างสำเร็จ';
+                btn.classList.remove('bg-yellow-500', 'hover:bg-yellow-600');
+                btn.classList.add('bg-green-600', 'hover:bg-green-700');
+            }
 
+            showAlert("สำเร็จ", "บันทึกการแก้ไขเรียบร้อยแล้ว");
+            
+            // 2. เปิดไฟล์ใหม่ให้ดูทันที (ใน Tab ใหม่)
+            if (newFileUrl) window.open(newFileUrl, '_blank');
+            
+            // 3. รีเฟรช Dashboard และพากลับไป
             if (typeof clearRequestsCache === 'function') clearRequestsCache();
-            await fetchUserRequests();
+            window.allRequestsCache = null; 
+            
+            await fetchUserRequests(); // โหลดข้อมูลใหม่เพื่อให้ Dashboard มีลิงก์ล่าสุด
+            
+            // กลับไปหน้า Dashboard
             switchPage('dashboard-page');
 
         } else {
@@ -1931,7 +1942,7 @@ async function saveEditRequest() {
     } catch (error) {
         console.error("Save Edit Error:", error);
         showAlert("บันทึกไม่สำเร็จ", "เกิดข้อผิดพลาด: " + error.message);
-    } finally {
+        // คืนค่าปุ่มกรณี Error
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = 'บันทึกการแก้ไข';

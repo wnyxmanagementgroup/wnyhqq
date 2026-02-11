@@ -13,27 +13,64 @@ function checkAdminAccess() {
 // --- FETCH DATA ---
 // --- แก้ไข: ดึงข้อมูลเนื้อหาจาก Google Sheet เป็นหลัก 100% ---
 // --- แก้ไข: เรียงลำดับจาก เลขที่เอกสาร (ล่าสุดขึ้นก่อน) และกรองปีงบประมาณ ---
+// --- FETCH DATA (Admin) ---
+// ดึงข้อมูลคำขอทั้งหมด (สำหรับหน้าออกคำสั่ง) โดยผสานข้อมูลจาก Google Sheets และ Firestore
 async function fetchAllRequestsForCommand() {
     try {
+        // 1. ตรวจสอบสิทธิ์ Admin เบื้องต้น (Client-side)
         if (!checkAdminAccess()) return;
         
-        // 1. ดึงปีงบประมาณที่เลือกจาก Dropdown
+        // 2. แสดง Loader
+        const container = document.getElementById('admin-requests-list');
+        if (container) {
+            container.innerHTML = `
+                <div class="flex flex-col items-center justify-center py-10">
+                    <span class="loader mb-3"></span>
+                    <p class="text-gray-500 animate-pulse">กำลังโหลดข้อมูลคำขอทั้งหมด...</p>
+                </div>`;
+        }
+
+        // 3. ★★★ รอให้ Firebase Auth พร้อมใช้งาน (แก้ปัญหา Rules Block) ★★★
+        if (typeof firebase !== 'undefined' && !firebase.auth().currentUser) {
+            console.warn("⏳ Waiting for Firebase Auth...");
+            await new Promise(resolve => {
+                const unsubscribe = firebase.auth().onAuthStateChanged(user => {
+                    unsubscribe();
+                    resolve(user);
+                });
+            });
+            
+            // ถ้าจังหวะนี้ยังไม่มี User แปลว่าไม่ได้ล็อกอินจริง -> ดีดออก
+            if (!firebase.auth().currentUser) {
+                console.error("❌ Admin not logged in (Firebase)");
+                showAlert('แจ้งเตือน', 'กรุณาเข้าสู่ระบบใหม่');
+                return;
+            }
+        }
+
+        // 4. ดึงปีงบประมาณที่เลือกจาก Dropdown
         const yearSelect = document.getElementById('admin-year-select');
         const currentYear = new Date().getFullYear() + 543;
         const selectedYear = yearSelect ? parseInt(yearSelect.value) : currentYear;
         
-        // 2. ดึงข้อมูลจาก Google Sheets (Source of Truth)
+        console.log(`📥 Fetching admin requests for year: ${selectedYear}`);
+
+        // 5. ดึงข้อมูลหลักจาก Google Sheets (Source of Truth)
         let requests = [];
         const result = await apiCall('GET', 'getAllRequests');
-        if (result.status === 'success') requests = result.data || [];
+        
+        if (result.status === 'success') {
+            requests = result.data || [];
+        } else {
+            throw new Error(result.message || "Failed to fetch from Google Sheets");
+        }
 
-        // 3. กรองข้อมูลตามปีงบประมาณที่เลือก (Filter by Year)
-        // เช็คจาก ID (เช่น "บค001/2569") หรือจาก docDate
+        // 6. กรองข้อมูลตามปีงบประมาณ (Filter by Year)
         requests = requests.filter(req => {
             const idYear = req.id ? parseInt(req.id.split('/')[1]) : 0;
-            if (idYear > 0) return idYear === selectedYear; // ถ้ามี ID ให้เช็คปีจาก ID
+            if (idYear > 0) return idYear === selectedYear; // เช็คจาก ID (แม่นยำที่สุด)
             
-            // ถ้าไม่มี ID ให้เช็คจากวันที่เอกสาร
+            // Fallback: เช็คจากวันที่เอกสาร
             if (req.docDate) {
                 const docY = new Date(req.docDate).getFullYear() + 543;
                 return docY === selectedYear;
@@ -41,47 +78,62 @@ async function fetchAllRequestsForCommand() {
             return false;
         });
 
-        // 4. Merge ข้อมูลจาก Firebase (เพื่อเอาสถานะล่าสุดและลิงก์ไฟล์)
+        // 7. Merge ข้อมูลจาก Firestore (เพื่อเอาสถานะล่าสุดและลิงก์ไฟล์ Real-time)
         if (typeof db !== 'undefined') {
-            const snapshot = await db.collection('requests').get();
-            const firebaseData = {};
-            snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
+            try {
+                // ดึงข้อมูลทั้งหมดจาก Collection 'requests'
+                const snapshot = await db.collection('requests').get();
+                const firebaseData = {};
+                snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
-            requests = requests.map(req => {
-                const safeId = req.id.replace(/[\/\\:\.]/g, '-');
-                const fbDoc = firebaseData[safeId];
-                
-                // จัดการรายชื่อ (ยึดตาม Google Sheets เป็นหลักเพื่อป้องกันข้อมูลหาย)
-                let sheetAttendees = [];
-                try {
-                    if (typeof req.attendees === 'string') sheetAttendees = JSON.parse(req.attendees);
-                    else if (Array.isArray(req.attendees)) sheetAttendees = req.attendees;
-                } catch(e) { sheetAttendees = []; }
+                requests = requests.map(req => {
+                    // สร้าง Key สำหรับค้นหาใน Firestore (แปลงตัวอักษรพิเศษเป็น -)
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
+                    const fbDoc = firebaseData[safeId];
+                    
+                    // แปลงรายชื่อผู้ร่วมเดินทาง (ป้องกัน JSON Error)
+                    let sheetAttendees = [];
+                    try {
+                        if (typeof req.attendees === 'string') sheetAttendees = JSON.parse(req.attendees);
+                        else if (Array.isArray(req.attendees)) sheetAttendees = req.attendees;
+                    } catch(e) { sheetAttendees = []; }
 
-                if (fbDoc) {
-                    return {
-                        ...req,
-                        pdfUrl: fbDoc.pdfUrl || fbDoc.fileUrl || req.pdfUrl,
-                        commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
-                        dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
-                        timestamp: fbDoc.timestamp || req.timestamp,
-                        attendees: sheetAttendees // บังคับใช้รายชื่อจาก Sheet
-                    };
-                }
-                return { ...req, attendees: sheetAttendees };
-            });
+                    if (fbDoc) {
+                        // ถ้าเจอใน Firestore ให้ใช้ข้อมูลล่าสุดจาก Firestore ทับ
+                        return {
+                            ...req,
+                            // ใช้ลิงก์จาก Firestore เป็นหลัก (เพราะอัปเดตเร็วกว่า Sheet)
+                            pdfUrl: fbDoc.pdfUrl || fbDoc.fileUrl || req.pdfUrl,
+                            fileUrl: fbDoc.fileUrl || fbDoc.pdfUrl || req.fileUrl,
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
+                            
+                            commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
+                            dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
+                            
+                            status: fbDoc.status || req.status,
+                            commandStatus: fbDoc.commandStatus || req.commandStatus,
+                            
+                            timestamp: fbDoc.timestamp || req.timestamp,
+                            attendees: sheetAttendees // ใช้รายชื่อจาก Sheet เสมอ (กันพลาด)
+                        };
+                    }
+                    // ถ้าไม่เจอใน Firestore ให้ใช้ข้อมูลเดิมจาก Sheet
+                    return { ...req, attendees: sheetAttendees };
+                });
+            } catch (fbError) {
+                console.warn("⚠️ Firestore Merge Failed (Using Sheet Data only):", fbError);
+                // ไม่ throw error เพื่อให้ทำงานต่อได้โดยใช้ข้อมูลจาก Sheet
+            }
         }
 
-        // 5. ★★★ แก้ไขการเรียงลำดับ (Sort) ★★★
-        // ใช้ Request ID เป็นตัวหลักในการเรียง (เพราะเลขรันต่อเนื่อง) 
-        // เรียงจาก มาก -> น้อย (รายการล่าสุดขึ้นก่อน)
+        // 8. เรียงลำดับ (Sort): เลขที่เอกสารมาก -> น้อย (ล่าสุดขึ้นก่อน)
         requests.sort((a, b) => {
-            // ฟังก์ชันแยกเลข ID (เช่น "บค005/2569" -> 5)
             const parseId = (id) => {
                 if (!id) return 0;
                 try {
-                    const parts = id.split('/'); // แยกปีกับเลข
-                    const numberPart = parseInt(parts[0].replace(/\D/g, '')) || 0; // เอาเฉพาะตัวเลขข้างหน้า
+                    // แยกเลขหน้าเครื่องหมาย / (เช่น "บค005/2569" -> 5)
+                    const parts = id.split('/');
+                    const numberPart = parseInt(parts[0].replace(/\D/g, '')) || 0;
                     return numberPart;
                 } catch (e) { return 0; }
             };
@@ -89,27 +141,38 @@ async function fetchAllRequestsForCommand() {
             const idNumA = parseId(a.id);
             const idNumB = parseId(b.id);
 
-            // ถ้าเลข ID ต่างกัน ให้เรียงเลขมากอยู่บน (Newest First)
-            if (idNumA !== idNumB) {
-                return idNumB - idNumA;
-            }
+            if (idNumA !== idNumB) return idNumB - idNumA; // เลขมากขึ้นก่อน
 
-            // ถ้าไม่มี ID หรือเลขเท่ากัน ให้ใช้วันที่ Timestamp หรือ DocDate ช่วย
+            // ถ้าเลขเท่ากัน หรือไม่มีเลข ให้ใช้วันที่
             const getTime = (val) => {
                 if (!val) return 0;
-                if (val.seconds) return val.seconds * 1000;
+                if (val.seconds) return val.seconds * 1000; // Firestore Timestamp
                 return new Date(val).getTime();
             };
             return getTime(b.timestamp || b.docDate) - getTime(a.timestamp || a.docDate);
         });
 
-        // อัปเดต Cache
+        console.log(`✅ Loaded ${requests.length} admin requests.`);
+
+        // 9. อัปเดต Cache และแสดงผล
         allRequestsCache = requests; 
         renderAdminRequestsList(requests);
 
     } catch (error) { 
-        console.error(error);
-        showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลได้'); 
+        console.error("❌ fetchAllRequestsForCommand Error:", error);
+        
+        const container = document.getElementById('admin-requests-list');
+        if (container) {
+            container.innerHTML = `
+                <div class="text-center py-10">
+                    <p class="text-red-500 font-medium">ไม่สามารถโหลดข้อมูลได้</p>
+                    <p class="text-sm text-gray-500 mt-2">${error.message}</p>
+                    <button onclick="fetchAllRequestsForCommand()" class="btn btn-sm bg-gray-200 hover:bg-gray-300 mt-4">
+                        ลองใหม่อีกครั้ง
+                    </button>
+                </div>`;
+        }
+        showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลได้: ' + error.message); 
     }
 }
 async function fetchAllMemos() {
@@ -246,10 +309,26 @@ async function handleAdminGenerateCommand() {
 }
 
 // --- RENDER FUNCTIONS ---
-// --- แก้ไขจุดที่ 2: เพิ่มปุ่มหนังสือส่งให้แสดงตลอดเวลา ---
-// ==========================================
-// RENDER FUNCTIONS - เพิ่มปุ่ม "ส่งบันทึกแทน" ให้แอดมิน
-// ==========================================
+// ในไฟล์ js/admin.js
+// --- Helper Function: แปลงวันที่เป็นไทย ---
+function formatThaiDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    // กรณี Date Invalid ให้คืนค่าเดิมกลับไป
+    if (isNaN(date.getTime())) return dateString;
+    
+    const thaiMonths = [
+        "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+        "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"
+    ];
+    
+    const d = date.getDate();
+    const m = thaiMonths[date.getMonth()];
+    const y = date.getFullYear() + 543;
+    
+    return `${d} ${m} ${y}`;
+}
+// --- 1. ฟังก์ชันแสดงรายการคำขอ (แบบละเอียด + Dropdown เปลี่ยนสถานะ) ---
 function renderAdminRequestsList(requests) {
     const container = document.getElementById('admin-requests-list');
     
@@ -385,6 +464,135 @@ function renderAdminRequestsList(requests) {
             </div>
         </div>`;
     }).join('');
+}
+
+// --- 2. ฟังก์ชัน Helper: เลือกสีของ Dropdown ---
+function getStatusClass(status) {
+    switch(status) {
+        case 'อนุมัติ': 
+        case 'เสร็จสิ้น':
+            return 'text-green-700 bg-green-50 ring-green-200'; // สีเขียว
+        case 'ไม่อนุมัติ': 
+            return 'text-red-700 bg-red-50 ring-red-200'; // สีแดง
+        case 'แก้ไข': 
+        case 'นำกลับไปแก้ไข':
+            return 'text-orange-700 bg-orange-50 ring-orange-200'; // สีส้ม
+        case 'รอตรวจสอบ':
+            return 'text-yellow-700 bg-yellow-50 ring-yellow-200'; // สีเหลือง
+        case 'กำลังดำเนินการ':
+            return 'text-blue-700 bg-blue-50 ring-blue-200'; // สีฟ้า
+        default: 
+            return 'text-gray-700 bg-gray-50 ring-gray-200'; // สีเทา
+    }
+}
+
+// --- 3. ฟังก์ชันอัปเดตสถานะ (เชื่อมต่อ API) ---
+async function updateMemoStatus(requestId, newStatus) {
+    // ถามยืนยันก่อนเปลี่ยน
+    if(!confirm(`ยืนยันการเปลี่ยนสถานะเป็น "${newStatus}" ใช่หรือไม่?`)) {
+        // ถ้ายกเลิก ให้โหลดตารางใหม่เพื่อคืนค่าเดิม
+        renderAdminRequestsList(allRequestsCache);
+        return;
+    }
+
+    try {
+        // 1. ส่งข้อมูลไปอัปเดตที่ Google Sheets (GAS)
+        // ใช้ apiCall ที่คุณมีอยู่แล้ว
+        const result = await apiCall('POST', 'updateRequest', {
+            id: requestId,
+            status: newStatus
+        });
+
+        if (result.status === 'success') {
+            
+            // 2. อัปเดต Firestore (เพื่อให้ User เห็นสถานะเปลี่ยนทันทีแบบ Realtime)
+            if (typeof db !== 'undefined') {
+                const safeId = requestId.replace(/[\/\\:\.]/g, '-');
+                // ใช้ update เพื่อแก้เฉพาะฟิลด์ status
+                await db.collection('requests').doc(safeId).update({
+                    status: newStatus,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                }).catch(err => console.warn("Firestore update warning:", err));
+            }
+
+            // 3. อัปเดต Cache ในเครื่อง Admin เอง (เพื่อให้สีเปลี่ยนโดยไม่ต้องโหลดใหม่)
+            const reqIndex = allRequestsCache.findIndex(r => r.id === requestId);
+            if(reqIndex !== -1) {
+                allRequestsCache[reqIndex].status = newStatus;
+                renderAdminRequestsList(allRequestsCache); // รีเฟรชตารางให้สีเปลี่ยน
+            }
+            
+            // แจ้งเตือนเล็กๆ
+            // showAlert('สำเร็จ', `เปลี่ยนสถานะเป็น ${newStatus} เรียบร้อยแล้ว`); 
+            
+        } else {
+            throw new Error(result.message);
+        }
+
+    } catch (error) {
+        console.error("Update Status Error:", error);
+        showAlert('ผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะได้: ' + error.message);
+        renderAdminRequestsList(allRequestsCache); // คืนค่าเดิมกรณี Error
+    }
+}
+// --- ฟังก์ชัน Helper สำหรับเปลี่ยนสี Dropdown ---
+function getStatusClass(status) {
+    switch(status) {
+        case 'อนุมัติ': return 'text-green-600 bg-green-50 border-green-200';
+        case 'ไม่อนุมัติ': return 'text-red-600 bg-red-50 border-red-200';
+        case 'แก้ไข': return 'text-orange-600 bg-orange-50 border-orange-200';
+        case 'เสร็จสิ้น': return 'text-blue-600 bg-blue-50 border-blue-200';
+        default: return 'text-yellow-600 bg-yellow-50 border-yellow-200';
+    }
+}
+
+// --- ฟังก์ชันอัปเดตสถานะ (เรียกเมื่อเปลี่ยน Dropdown) ---
+async function updateMemoStatus(requestId, newStatus) {
+    if(!confirm(`ยืนยันการเปลี่ยนสถานะเป็น "${newStatus}" หรือไม่?`)) {
+        // ถ้ายกเลิก ให้โหลดตารางใหม่เพื่อคืนค่าเดิม
+        renderAdminRequestsList(allRequestsCache); 
+        return;
+    }
+
+    try {
+        // แสดง Loader เล็กๆ หรือแจ้งเตือนมุมจอ
+        // showToast('กำลังบันทึกสถานะ...'); 
+
+        // 1. อัปเดตผ่าน API (GAS)
+        const result = await apiCall('POST', 'updateRequest', {
+            id: requestId,
+            status: newStatus,
+            // ถ้าเป็นสถานะเสร็จสิ้น อาจจะอัปเดต commandStatus ด้วยก็ได้ถ้าต้องการ
+        });
+
+        if (result.status === 'success') {
+            
+            // 2. อัปเดต Firestore (Realtime)
+            if (typeof db !== 'undefined') {
+                const safeId = requestId.replace(/[\/\\:\.]/g, '-');
+                await db.collection('requests').doc(safeId).update({
+                    status: newStatus,
+                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                });
+            }
+
+            // 3. อัปเดต Cache ในเครื่องเพื่อให้หน้าจอไมกระตุก
+            const reqIndex = allRequestsCache.findIndex(r => r.id === requestId);
+            if(reqIndex !== -1) {
+                allRequestsCache[reqIndex].status = newStatus;
+                // รีเฟรชตารางใหม่เพื่อให้สี Dropdown เปลี่ยน
+                renderAdminRequestsList(allRequestsCache);
+            }
+            
+            showAlert('สำเร็จ', `เปลี่ยนสถานะเป็น ${newStatus} เรียบร้อยแล้ว`);
+        } else {
+            throw new Error(result.message);
+        }
+    } catch (error) {
+        console.error(error);
+        showAlert('ผิดพลาด', 'ไม่สามารถเปลี่ยนสถานะได้');
+        renderAdminRequestsList(allRequestsCache); // คืนค่าเดิม
+    }
 }
 // --- แก้ไขในไฟล์ js/admin.js ---
 
@@ -1526,4 +1734,98 @@ async function handleSaveAnnouncement(e) {
     } finally {
         toggleLoader('save-announcement-btn', false);
     }
+}
+// ในไฟล์ js/admin.js
+
+function openDispatchBookModal(requestId) {
+    console.log("Opening Dispatch Modal for:", requestId);
+
+    // 1. ค้นหาข้อมูลคำขอจาก Cache (ที่โหลดมาแล้วในตาราง)
+    const req = allRequestsCache.find(r => r.id === requestId || r.requestId === requestId);
+    
+    if (!req) {
+        alert('ไม่พบข้อมูลคำขอ กรุณารีโหลดหน้าเว็บ');
+        return;
+    }
+
+    // 2. เปิด Modal (ต้องตรงกับ ID ใน index.html)
+    const modal = document.getElementById('dispatch-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        modal.style.display = 'flex'; // บังคับแสดงผล
+    } else {
+        console.error("❌ ไม่พบ Element ID: dispatch-modal ในหน้าเว็บ");
+        return;
+    }
+
+    // 3. เซ็ตค่าพื้นฐานลงในฟอร์ม
+    const setVal = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) el.value = (val !== undefined && val !== null) ? val : '';
+    };
+
+    setVal('dispatch-request-id', requestId);
+
+    // วันที่ปัจจุบัน (สำหรับ Default ปี/เดือน)
+    const today = new Date();
+    const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+    
+    // สร้างตัวเลือกเดือน
+    const monthSelect = document.getElementById('dispatch-month');
+    if (monthSelect) {
+        monthSelect.innerHTML = "";
+        thaiMonths.forEach((m) => {
+            const option = document.createElement('option');
+            option.value = m;
+            option.textContent = m;
+            if (m === req.dispatchMonth || (!req.dispatchMonth && m === thaiMonths[today.getMonth()])) {
+                option.selected = true;
+            }
+            monthSelect.appendChild(option);
+        });
+    }
+
+    setVal('dispatch-year', req.dispatchYear || (today.getFullYear() + 543));
+    setVal('student-count', req.studentCount || '0');
+    setVal('teacher-count', req.teacherCount || '0');
+
+    // รายละเอียดอื่นๆ
+    setVal('dispatch-purpose', req.purpose || '');
+    setVal('dispatch-location', req.location || '');
+    setVal('dispatch-stay-at', req.stayAt || '-');
+    setVal('dispatch-vehicle-type', req.vehicleType || '-');
+    setVal('dispatch-vehicle-id', req.vehicleId || '-');
+
+    // วันที่และเวลาเดินทาง
+    setVal('dispatch-date-start', req.startDate || '');
+    setVal('dispatch-time-start', req.startTime || '06:00');
+    setVal('dispatch-date-end', req.endDate || '');
+    setVal('dispatch-time-end', req.endTime || '18:00');
+
+    // 4. เซ็ตค่า "สิ่งที่ส่งมาด้วย" (1-7)
+    // รองรับทั้งแบบแก้ไขได้ (input) และแบบดูอย่างเดียว (ถ้ายังไม่ได้แก้ HTML)
+    const setItem = (index, defaultText) => {
+        // ชื่อเอกสาร (item1, item2...)
+        const itemInput = document.getElementById(`dispatch-item-${index}`);
+        if (itemInput) {
+            // ถ้ามีข้อมูลใน DB ให้ใช้ค่าเดิม ถ้าไม่มีให้ใช้ค่า Default
+            const savedItem = req[`item${index}`];
+            itemInput.value = (savedItem && savedItem !== 'undefined') ? savedItem : defaultText;
+        }
+
+        // จำนวน (qty1, qty2...)
+        const qtyInput = document.getElementById(`qty${index}`); // ID ตาม HTML ของคุณคือ qty1, qty2
+        if (qtyInput) {
+            const savedQty = req[`qty${index}`];
+            qtyInput.value = (savedQty && savedQty !== 'undefined') ? savedQty : '๑';
+        }
+    };
+
+    setItem(1, "หนังสือเชิญ");
+    setItem(2, "คำสั่งโรงเรียน");
+    setItem(3, "รายชื่อนักเรียน");
+    setItem(4, "แผนที่เดินทาง");
+    setItem(5, "หนังสือขออนุญาต");
+    setItem(6, "กรมธรรม์");
+    setItem(7, "กำหนดการ");
 }
