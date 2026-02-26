@@ -1162,8 +1162,6 @@ function openCommandApproval(requestId) {
 
 // แก้ไขในไฟล์ admin.js
 
-// ใน admin.js
-
 async function openDispatchModal(requestId) {
     if (!checkAdminAccess()) return;
     
@@ -1177,39 +1175,56 @@ async function openDispatchModal(requestId) {
         if(el) el.value = "๑";
     }
 
-    // สร้าง Dropdown เดือน (เหมือนเดิม)
+    // สร้าง Dropdown เดือน
     const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
     const now = new Date();
     const monthSelect = document.getElementById('dispatch-month');
-    monthSelect.innerHTML = thaiMonths.map(m => `<option value="${m}" ${m === thaiMonths[now.getMonth()] ? 'selected' : ''}>${m}</option>`).join('');
-    document.getElementById('dispatch-year').value = now.getFullYear() + 543;
+    if(monthSelect) {
+        monthSelect.innerHTML = thaiMonths.map(m => `<option value="${m}" ${m === thaiMonths[now.getMonth()] ? 'selected' : ''}>${m}</option>`).join('');
+    }
+    const yearInput = document.getElementById('dispatch-year');
+    if(yearInput) yearInput.value = now.getFullYear() + 543;
 
     try {
         toggleLoader('admin-requests-list', true);
         
-        // 2. ดึงข้อมูลคำขอ
+        // 2. ดึงข้อมูลคำขอจาก Google Sheets (GAS)
         const result = await apiCall('GET', 'getDraftRequest', { requestId: requestId });
         let data = {};
         if (result.status === 'success') {
             data = result.data.data || result.data;
         }
-        if (data.dispatchVehicleType && data.dispatchVehicleType !== "") {
-            document.getElementById('dispatch-vehicle-type').value = data.dispatchVehicleType;
-            document.getElementById('dispatch-vehicle-id').value = data.dispatchVehicleId;
-        } else {
-            // Fallback: ถ้าไม่มี (กรณีอยู่ในจังหวัด หรือเป็นข้อมูลเก่า) ให้ลองแปลงจาก checkbox เดิม
-            let vType = 'รถตู้'; 
-            if (data.vehicleOption === 'gov') vType = 'รถบัสโรงเรียน'; 
-            else if (data.vehicleOption === 'private') vType = 'รถยนต์ส่วนตัว';
-            else if (data.vehicleOption === 'public') vType = 'รถโดยสารสาธารณะ';
-            
-            document.getElementById('dispatch-vehicle-type').value = vType;
-            document.getElementById('dispatch-vehicle-id').value = data.licensePlate || data.publicVehicleDetails || '-';
+
+        // ★★★ 2.5 ดึงข้อมูลที่ขาดหายไปจาก Firebase (สำคัญมาก: แก้ปัญหาที่พักไม่แสดง) ★★★
+        if (typeof db !== 'undefined') {
+            try {
+                const safeId = requestId.replace(/[\/\\:\.]/g, '-');
+                const fbDoc = await db.collection('requests').doc(safeId).get();
+                if (fbDoc.exists) {
+                    const fbData = fbDoc.data();
+                    // ดึงข้อมูลใหม่ๆ ที่อาจจะยังไม่มีใน Sheet มาทับ
+                    if (fbData.stayAt) data.stayAt = fbData.stayAt;
+                    if (fbData.dispatchVehicleType) data.dispatchVehicleType = fbData.dispatchVehicleType;
+                    if (fbData.dispatchVehicleId) data.dispatchVehicleId = fbData.dispatchVehicleId;
+                    
+                    // หากแอดมินเคยออกหนังสือส่งและแก้ไขไปแล้ว ให้ดึงข้อมูลล่าสุดมาแสดง
+                    if (fbData.dispatchMeta) {
+                        if (fbData.dispatchMeta.stayAt) data.stayAt = fbData.dispatchMeta.stayAt;
+                        if (fbData.dispatchMeta.studentCount !== undefined) data.studentCount = fbData.dispatchMeta.studentCount;
+                        if (fbData.dispatchMeta.teacherCount !== undefined) data.teacherCount = fbData.dispatchMeta.teacherCount;
+                    }
+                }
+            } catch(e) {
+                console.warn("Firebase fetch error in openDispatchModal:", e);
+            }
         }
+
         // 3. เติมข้อมูลพื้นฐานลงฟอร์ม
         document.getElementById('dispatch-purpose').value = data.purpose || '';
         document.getElementById('dispatch-location').value = data.location || '';
-        document.getElementById('dispatch-stay-at').value = data.stayAt || ''; // ที่พัก
+        
+        // ตอนนี้ข้อมูล 'ที่พัก' จะถูกแสดงอย่างถูกต้องแล้ว
+        document.getElementById('dispatch-stay-at').value = data.stayAt || ''; 
 
         // 4. จัดการวันที่และเวลา
         const toInputDate = (d) => d ? new Date(d).toISOString().split('T')[0] : '';
@@ -1218,13 +1233,12 @@ async function openDispatchModal(requestId) {
         document.getElementById('dispatch-time-start').value = data.startTime || '06:00';
         document.getElementById('dispatch-time-end').value = data.endTime || '18:00';
 
-        // 5. จัดการยานพาหนะ (Logic ใหม่: เช็คช่องแยกก่อน)
-        // ถ้า User กรอกข้อมูลในช่อง "ยานพาหนะสำหรับหนังสือส่ง" (dispatchVehicleType) มาให้ใช้ค่านี้ก่อน
+        // 5. จัดการยานพาหนะ
         if (data.dispatchVehicleType && data.dispatchVehicleType.trim() !== "") {
             document.getElementById('dispatch-vehicle-type').value = data.dispatchVehicleType;
             document.getElementById('dispatch-vehicle-id').value = data.dispatchVehicleId || '-';
         } else {
-            // Fallback: ถ้าไม่มี (เช่น อยู่ในจังหวัดเดียวกัน หรือเป็นข้อมูลเก่า) ให้แปลงจาก Checkbox เดิม
+            // Fallback: ถ้าไม่มีข้อมูลแบบใหม่ ให้แปลงจาก Checkbox เดิม
             let vType = 'รถตู้'; 
             if (data.vehicleOption === 'gov') vType = 'รถบัสโรงเรียน'; 
             else if (data.vehicleOption === 'private') vType = 'รถยนต์ส่วนตัว';
@@ -1235,29 +1249,34 @@ async function openDispatchModal(requestId) {
         }
 
         // 6. นับจำนวนครู/นักเรียนอัตโนมัติ
-        let attendees = [];
-        try { 
-            attendees = typeof data.attendees === 'string' ? JSON.parse(data.attendees) : (data.attendees || []); 
-        } catch(e) { 
-            attendees = []; 
-        }
-        
-        let sCount = 0; // นักเรียน
-        let tCount = 0; // ครู/บุคลากร
-        const isStudent = (pos) => (pos || '').trim().includes('นักเรียน');
-        
-        // เช็คผู้ขอ
-        if (isStudent(data.requesterPosition)) sCount++; else tCount++;
-        
-        // เช็คผู้ติดตาม (กันชื่อซ้ำกับผู้ขอ)
-        attendees.forEach(att => {
-            if ((att.name||'').trim() !== (data.requesterName||'').trim()) {
-                if (isStudent(att.position)) sCount++; else tCount++;
+        if (data.studentCount !== undefined && data.teacherCount !== undefined) {
+            document.getElementById('student-count').value = data.studentCount;
+            document.getElementById('teacher-count').value = data.teacherCount;
+        } else {
+            let attendees = [];
+            try { 
+                attendees = typeof data.attendees === 'string' ? JSON.parse(data.attendees) : (data.attendees || []); 
+            } catch(e) { 
+                attendees = []; 
             }
-        });
+            
+            let sCount = 0; // นักเรียน
+            let tCount = 0; // ครู/บุคลากร
+            const isStudent = (pos) => (pos || '').trim().includes('นักเรียน');
+            
+            // เช็คผู้ขอ
+            if (isStudent(data.requesterPosition)) sCount++; else tCount++;
+            
+            // เช็คผู้ติดตาม
+            attendees.forEach(att => {
+                if ((att.name||'').trim() !== (data.requesterName||'').trim()) {
+                    if (isStudent(att.position)) sCount++; else tCount++;
+                }
+            });
 
-        document.getElementById('student-count').value = sCount;
-        document.getElementById('teacher-count').value = tCount;
+            document.getElementById('student-count').value = sCount;
+            document.getElementById('teacher-count').value = tCount;
+        }
 
         // 7. เปิด Modal
         const modal = document.getElementById('dispatch-modal');
