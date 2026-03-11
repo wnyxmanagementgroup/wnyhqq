@@ -237,8 +237,8 @@ async function fetchUserRequests() {
                 snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
                 requests = requests.map(req => {
-                    const safeId = req.id.replace(/[\/\\:\.]/g, '-');
-                    const fbDoc = firebaseData[safeId];
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
+                    const fbDoc = safeId ? firebaseData[safeId] : null;
                     
                     if (fbDoc) {
                         return {
@@ -270,7 +270,8 @@ async function fetchUserRequests() {
             });
         }
 
-        // 4. แสดงผล
+        // 4. บันทึก Cache และแสดงผล
+        userRequestsCache = requests;
         renderUserRequests(requests);
 
     } catch (error) {
@@ -439,7 +440,9 @@ function renderUserRequests(requests) {
 function renderRequestsList(requests, memos, searchTerm = '') {
     const container = document.getElementById('requests-list');
     const noRequestsMessage = document.getElementById('no-requests-message');
-    
+
+    if (!container) return; // ป้องกัน crash ถ้าไม่มี element นี้ใน HTML
+
     if (!requests || requests.length === 0) {
         container.classList.add('hidden');
         noRequestsMessage.classList.remove('hidden');
@@ -1192,10 +1195,6 @@ async function resetRequestForm() {
     document.getElementById('form-doc-date').value = today;
     document.getElementById('form-start-date').value = today;
     document.getElementById('form-end-date').value = today;
-    document.getElementById('form-department').addEventListener('change', (e) => {
-        const selectedDept = e.target.value;
-        document.getElementById('form-head-name').value = specialPositionMap[selectedDept] || '';
-    });
 }
 
 function addAttendeeField() {
@@ -1741,9 +1740,19 @@ function updateNotifications(requests, memos) {
 function openSendMemoFromNotif(requestId) {
     // ปิด Dropdown
     document.getElementById('notification-dropdown').classList.add('hidden');
-    
-    // เปิด Modal
+
+    // Reset Form และตั้งค่า ID
+    document.getElementById('send-memo-form').reset();
     document.getElementById('memo-modal-request-id').value = requestId;
+
+    // Trigger Radio Button เพื่ออัปเดต UI
+    const nonReimburseRadio = document.getElementById('memo_type_non_reimburse');
+    if (nonReimburseRadio) {
+        nonReimburseRadio.checked = true;
+        nonReimburseRadio.dispatchEvent(new Event('change'));
+    }
+
+    // เปิด Modal
     document.getElementById('send-memo-modal').style.display = 'flex';
 }
 

@@ -162,6 +162,7 @@ function clearRequestsCache() {
     allRequestsCache = [];
     allMemosCache = [];
     userMemosCache = [];
+    userRequestsCache = [];
 }
 
 function checkAdminAccess() {

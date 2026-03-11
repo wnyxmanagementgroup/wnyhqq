@@ -249,6 +249,7 @@ function setupEventListeners() {
     document.getElementById('send-memo-modal-close-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
     document.getElementById('send-memo-cancel-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
     document.getElementById('send-memo-form')?.addEventListener('submit', handleMemoSubmitFromModal);
+    setupMemoModalLogic();
 
     // --- Stats ---
     document.getElementById('refresh-stats')?.addEventListener('click', async () => { 
@@ -308,10 +309,10 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
             if(f2) f2.required = false;
         } else {
             nonReimburseContainer.classList.remove('hidden');
-            // บังคับ required (ต้องกรอก)
+            // file-exchange เป็น optional, file-ref-doc บังคับ
             const f1 = document.getElementById('file-exchange');
             const f2 = document.getElementById('file-ref-doc');
-            if(f1) f1.required = true;
+            if(f1) f1.required = false;
             if(f2) f2.required = true;
         }
     }
@@ -338,7 +339,19 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
     
     const searchInput = document.getElementById('search-requests');
     if (searchInput) {
-        searchInput.addEventListener('input', (e) => renderRequestsList(allRequestsCache, userMemosCache, e.target.value));
+        searchInput.addEventListener('input', (e) => {
+            const term = e.target.value.toLowerCase();
+            if (!term) {
+                renderUserRequests(userRequestsCache);
+                return;
+            }
+            const filtered = userRequestsCache.filter(req =>
+                (req.purpose && req.purpose.toLowerCase().includes(term)) ||
+                (req.location && req.location.toLowerCase().includes(term)) ||
+                (req.id && req.id.toLowerCase().includes(term))
+            );
+            renderUserRequests(filtered);
+        });
     }
 
     // --- Admin User Mgmt ---
@@ -638,10 +651,11 @@ function convertToDirectLink(url) {
 // ฟังก์ชันสำหรับดูตัวอย่างรูปทันทีที่วางลิงก์
 function updateAnnouncementPreview(url) {
     const preview = document.getElementById('current-announcement-img-preview');
+    if (!preview) return;
     const img = preview.querySelector('img');
     const directUrl = convertToDirectLink(url);
-    
-    if (directUrl) {
+
+    if (directUrl && img) {
         preview.classList.remove('hidden');
         img.src = directUrl;
     }
@@ -754,17 +768,19 @@ function setupMemoModalLogic() {
     
     // ตั้งค่าเริ่มต้น
     const updateVisibility = () => {
-        const isNonReimburse = document.getElementById('memo_type_non_reimburse').checked;
+        const memoTypeEl = document.getElementById('memo_type_non_reimburse');
+        if (!memoTypeEl || !nonReimburseContainer) return;
+        const isNonReimburse = memoTypeEl.checked;
+        const fileExchange = document.getElementById('file-exchange');
+        const fileRefDoc = document.getElementById('file-ref-doc');
         if (isNonReimburse) {
             nonReimburseContainer.classList.remove('hidden');
-            // บังคับ Required
-            document.getElementById('file-exchange').required = true;
-            document.getElementById('file-ref-doc').required = true;
+            if (fileExchange) fileExchange.required = false;
+            if (fileRefDoc) fileRefDoc.required = true;
         } else {
             nonReimburseContainer.classList.add('hidden');
-            // ปลด Required
-            document.getElementById('file-exchange').required = false;
-            document.getElementById('file-ref-doc').required = false;
+            if (fileExchange) fileExchange.required = false;
+            if (fileRefDoc) fileRefDoc.required = false;
         }
     };
 
@@ -864,8 +880,8 @@ async function handleMemoSubmitFromModal(e) {
             // ถ้าเป็น Admin และมีการแนบไฟล์มาบางส่วน ก็ให้รวมไฟล์ตามปกติ
             
             if (!isAdmin) {
-                if (!fileSigned || !fileExchange || !fileRef) {
-                    throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. ไฟล์แลกคาบสอน\n3. หนังสือต้นเรื่อง");
+                if (!fileSigned || !fileRef) {
+                    throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. หนังสือต้นเรื่อง");
                 }
             }
 
@@ -980,8 +996,8 @@ function updateSidebarForRole(user) {
             if (el) el.style.display = 'block'; // หรือ 'flex' แล้วแต่ CSS
         });
 
-        // 3. บังคับเปลี่ยนหน้าไปที่ Admin Panel ทันที
-        switchPage('admin-panel'); 
+        // 3. บังคับเปลี่ยนหน้าไปที่หน้า Admin ทันที
+        switchPage('command-generation-page');
 
     } else {
         // --- กรณีเป็น User ทั่วไป ---
@@ -996,8 +1012,8 @@ function updateSidebarForRole(user) {
             const el = document.getElementById(id);
             if (el) el.style.display = 'none';
         });
-        
+
         // 3. ไปหน้า Dashboard
-        switchPage('dashboard');
+        switchPage('dashboard-page');
     }
 }
