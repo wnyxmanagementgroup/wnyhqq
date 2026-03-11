@@ -1157,7 +1157,7 @@ function openAddUserModal() {
     document.getElementById('register-modal').style.display = 'flex';
 }
 
-function openEditUserModal(username) {
+window.openEditUserModal = function openEditUserModal(username) {
     if (!checkAdminAccess()) return;
 
     const user = allUsersCache.find(u => u.username === username);
