@@ -1,7 +1,5 @@
 // --- PAGE NAVIGATION & EVENT LISTENERS ---
 
-let notificationUnsubscribe = null;
-
 async function switchPage(targetPageId) {
     console.log("🔄 Switching to page:", targetPageId);
     
@@ -101,98 +99,6 @@ function setupVehicleOptions() {
     document.querySelectorAll('input[name="edit-vehicle_option"].vehicle-checkbox').forEach(checkbox => { 
         checkbox.addEventListener('change', toggleEditVehicleDetails); 
     });
-}
-// [เพิ่มฟังก์ชัน Real-time Notification]
-function startRealtimeNotifications() {
-    const user = getCurrentUser();
-    if (!user || typeof db === 'undefined') return;
-
-    // ถ้าเคยฟังอยู่แล้ว ให้ยกเลิกก่อนกันซ้ำ
-    if (notificationUnsubscribe) {
-        notificationUnsubscribe();
-    }
-
-    console.log("🔔 Starting Real-time Notification Listener...");
-
-    // ใช้ onSnapshot เพื่อฟังการเปลี่ยนแปลงข้อมูลแบบทันที
-    notificationUnsubscribe = db.collection('requests')
-        .where('username', '==', user.username)
-        .onSnapshot((snapshot) => {
-            let pendingCount = 0;
-            let pendingItems = [];
-
-            // วนลูปเช็คเอกสารทุกตัวที่มีการเปลี่ยนแปลง
-            snapshot.forEach((doc) => {
-                const req = doc.data();
-                const reqId = req.requestId || req.id;
-                
-                // Logic เดียวกับ updateNotifications เดิม
-                const hasCreated = (req.pdfUrl && req.pdfUrl !== '') || req.completedMemoUrl;
-                
-                // ตรวจสอบสถานะว่าเสร็จสิ้นหรือยัง
-                const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน');
-                const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-                
-                // ถ้าสร้างไฟล์แล้ว แต่ยังไม่เสร็จ หรือต้องแก้ไข -> นับเป็น pending
-                if (hasCreated && (!isCompleted || isFixing)) {
-                    pendingCount++;
-                    pendingItems.push({
-                        id: reqId,
-                        purpose: req.purpose,
-                        startDate: req.startDate,
-                        isFix: isFixing
-                    });
-                }
-            });
-
-            // อัปเดต UI ทันที
-            renderNotificationUI(pendingCount, pendingItems);
-        }, (error) => {
-            console.warn("Real-time Notification Error:", error);
-        });
-}
-
-function renderNotificationUI(count, items) {
-    const badge = document.getElementById('notification-badge');
-    const countText = document.getElementById('notification-count-text');
-    const listContainer = document.getElementById('notification-list');
-
-    if (!badge) return;
-
-    // Badge จุดแดง
-    if (count > 0) {
-        badge.textContent = count;
-        badge.classList.remove('hidden');
-        badge.classList.add('animate-bounce');
-        setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
-    } else {
-        badge.classList.add('hidden');
-    }
-
-    if (countText) countText.textContent = `${count} รายการ`;
-
-    // Dropdown List
-    if (count === 0) {
-        listContainer.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center"><svg class="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>ส่งครบทุกรายการแล้ว</div>`;
-    } else {
-        listContainer.innerHTML = items.map(item => {
-            const statusBadge = item.isFix 
-                ? `<span class="text-xs bg-red-100 text-red-600 px-1.5 rounded border border-red-200">แก้ไข</span>` 
-                : `<span class="text-xs bg-yellow-100 text-yellow-600 px-1.5 rounded border border-yellow-200">รอส่ง</span>`;
-            
-            return `
-            <div onclick="openSendMemoFromNotif('${item.id}')" class="p-3 hover:bg-indigo-50 cursor-pointer transition flex justify-between items-start group border-b border-gray-50 last:border-0">
-                <div>
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="font-bold text-sm text-indigo-700">${escapeHtml(item.id || 'รอเลข')}</span>
-                        ${statusBadge}
-                    </div>
-                    <p class="text-xs text-gray-500 line-clamp-1">${escapeHtml(item.purpose)}</p>
-                </div>
-                <div class="text-indigo-400 opacity-0 group-hover:opacity-100 transition transform translate-x-[-5px] group-hover:translate-x-0">➤</div>
-            </div>`;
-        }).join('');
-    }
 }
 function setupEventListeners() {
     if (typeof setupFormConditions === 'function') setupFormConditions();
@@ -414,25 +320,6 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
         });
     }
 
-    // --- [NEW] NOTIFICATION BELL (กระดิ่งแจ้งเตือน) ---
-    const notifBtn = document.getElementById('notification-btn');
-    const notifDropdown = document.getElementById('notification-dropdown');
-
-    if (notifBtn && notifDropdown) {
-        // กดปุ่มกระดิ่ง -> เปิด/ปิด Dropdown
-        notifBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // กันไม่ให้ไปโดน event คลิกพื้นหลัง
-            notifDropdown.classList.toggle('hidden');
-        });
-
-        // คลิกที่อื่น -> ปิด Dropdown
-        document.addEventListener('click', (e) => {
-            if (!notifBtn.contains(e.target) && !notifDropdown.contains(e.target)) {
-                notifDropdown.classList.add('hidden');
-            }
-        });
-    }
-
     // --- [NEW] PROMPT SEND MEMO MODAL (แจ้งเตือนส่งงานทันทีหลังสร้าง) ---
     const promptModal = document.getElementById('prompt-send-memo-modal');
     const closePrompt = () => { if(promptModal) promptModal.style.display = 'none'; };
@@ -483,11 +370,6 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
     // Submit ฟอร์มประกาศ
     document.getElementById('admin-announcement-form')?.addEventListener('submit', handleSaveAnnouncement);
 
-    // เริ่มต้นระบบแจ้งเตือน (ถ้า User Login อยู่แล้ว)
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-        startRealtimeNotifications();
-    }
 }
 
 function handleExcelImport(e) {
