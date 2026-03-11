@@ -135,8 +135,9 @@ async function generateCommandHybrid(data) {
         
         const updateData = {
             commandStatus: 'เสร็จสิ้น',
-            commandBookUrl: finalUrl, 
-            commandPdfUrl: finalUrl, // เพิ่ม field นี้ด้วย
+            status: 'เสร็จสิ้น',
+            commandBookUrl: finalUrl,
+            commandPdfUrl: finalUrl,
             commandDocUrl: gasResult.data.docUrl || '',
             lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
         };

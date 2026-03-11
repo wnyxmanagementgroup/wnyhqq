@@ -99,22 +99,23 @@ async function fetchAllRequestsForCommand() {
                     } catch(e) { sheetAttendees = []; }
 
                     if (fbDoc) {
-                        // ถ้าเจอใน Firestore ให้ใช้ข้อมูลล่าสุดจาก Firestore ทับ
+                        const mergedCommandStatus = fbDoc.commandStatus || req.commandStatus;
+                        // commandStatus เป็นหลัก: ถ้าออกคำสั่งแล้ว ให้ status เป็น 'เสร็จสิ้น' เสมอ
+                        const mergedStatus = mergedCommandStatus === 'เสร็จสิ้น'
+                            ? 'เสร็จสิ้น'
+                            : (fbDoc.status || req.status);
                         return {
                             ...req,
-                            // ใช้ลิงก์จาก Firestore เป็นหลัก (เพราะอัปเดตเร็วกว่า Sheet)
                             pdfUrl: fbDoc.pdfUrl || fbDoc.fileUrl || req.pdfUrl,
                             fileUrl: fbDoc.fileUrl || fbDoc.pdfUrl || req.fileUrl,
                             memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
-                            
+                            completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
-                            
-                            status: fbDoc.status || req.status,
-                            commandStatus: fbDoc.commandStatus || req.commandStatus,
-                            
+                            status: mergedStatus,
+                            commandStatus: mergedCommandStatus,
                             timestamp: fbDoc.timestamp || req.timestamp,
-                            attendees: sheetAttendees // ใช้รายชื่อจาก Sheet เสมอ (กันพลาด)
+                            attendees: sheetAttendees
                         };
                     }
                     // ถ้าไม่เจอใน Firestore ให้ใช้ข้อมูลเดิมจาก Sheet
@@ -290,9 +291,10 @@ async function handleAdminGenerateCommand() {
             const safeId = requestId.replace(/[\/\\:\.]/g, '-');
             if (typeof db !== 'undefined') {
                 await db.collection('requests').doc(safeId).set({
-                    commandStatus: 'เสร็จสิ้น', 
+                    commandStatus: 'เสร็จสิ้น',
+                    status: 'เสร็จสิ้น',
                     commandPdfUrl: pdfUpload.url,
-                    attendees: attendees, // บันทึกรายชื่อที่ใช้ออกคำสั่งลงไป
+                    attendees: attendees,
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
             }
@@ -408,13 +410,14 @@ function renderAdminRequestsList(requests) {
                 </a>`;
         }
 
+        // commandStatus เป็นหลัก
+        const commandDone = request.commandStatus === 'เสร็จสิ้น' || !!request.commandPdfUrl;
+
         let commandActionButtons = '';
-        if (request.commandPdfUrl) {
+        if (commandDone) {
             commandActionButtons = `
                 <div class="flex flex-wrap gap-2 justify-end mt-2 md:mt-0">
-                    <a href="${request.commandPdfUrl}" target="_blank" class="btn bg-blue-600 hover:bg-blue-700 text-white btn-sm flex items-center gap-1 shadow-sm px-3">
-                        📄 ดูคำสั่ง
-                    </a>
+                    ${request.commandPdfUrl ? `<a href="${request.commandPdfUrl}" target="_blank" class="btn bg-blue-600 hover:bg-blue-700 text-white btn-sm flex items-center gap-1 shadow-sm px-3">📄 ดูคำสั่ง</a>` : ''}
                     ${dispatchButtonHtml}
                     <button onclick="openAdminGenerateCommand('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-sm px-3">
                         ✏️ แก้ไข/ออกใหม่
@@ -433,13 +436,13 @@ function renderAdminRequestsList(requests) {
         }
 
         return `
-        <div class="border rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition duration-200 mb-4 border-l-4 ${request.commandPdfUrl ? 'border-l-green-500' : 'border-l-yellow-400'}">
+        <div class="border rounded-xl p-5 bg-white shadow-sm hover:shadow-md transition duration-200 mb-4 border-l-4 ${commandDone ? 'border-l-green-500' : 'border-l-yellow-400'}">
             <div class="flex flex-col md:flex-row justify-between items-start gap-4">
                 <div class="flex-1 min-w-[250px]">
                     <div class="flex flex-wrap items-center gap-2 mb-1">
                         <h4 class="font-bold text-indigo-700 text-lg">${safeId}</h4>
-                        <span class="text-xs px-2 py-0.5 rounded-full ${request.commandPdfUrl ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">
-                            ${request.commandPdfUrl ? 'ออกคำสั่งแล้ว' : 'รอออกคำสั่ง'}
+                        <span class="text-xs px-2 py-0.5 rounded-full ${commandDone ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">
+                            ${commandDone ? 'ออกคำสั่งแล้ว' : 'รอออกคำสั่ง'}
                         </span>
                         ${expenseBadge} ${dispatchUrl ? `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">มีหนังสือส่ง</span>` : ''}
                     </div>
@@ -1483,15 +1486,19 @@ async function handleAdminMemoActionSubmit(e) {
             const safeId = memoId.replace(/[\/\\:\.]/g, '-');
 
             if (typeof db !== 'undefined') {
-                 const updateData = { status: status };
-                 if (urls.completedMemoUrl) updateData.completedMemoUrl = urls.completedMemoUrl;
-                 if (urls.completedCommandUrl) updateData.completedCommandUrl = urls.completedCommandUrl;
-                 if (urls.dispatchBookUrl) updateData.dispatchBookUrl = urls.dispatchBookUrl;
+                const updateData = { status: status };
+                // ถ้าสถานะบันทึกถึงขั้นสุดท้าย ให้อัปเดต commandStatus ตาม
+                if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || status === 'เสร็จสิ้น') {
+                    updateData.commandStatus = 'เสร็จสิ้น';
+                }
+                if (urls.completedMemoUrl) updateData.completedMemoUrl = urls.completedMemoUrl;
+                if (urls.completedCommandUrl) updateData.completedCommandUrl = urls.completedCommandUrl;
+                if (urls.dispatchBookUrl) updateData.dispatchBookUrl = urls.dispatchBookUrl;
 
-                 try {
+                try {
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });
                     await db.collection('requests').doc(safeId).set(updateData, { merge: true });
-                 } catch (e) { console.warn("Firestore update error:", e); }
+                } catch (e) { console.warn("Firestore update error:", e); }
             }
 
             if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') { 

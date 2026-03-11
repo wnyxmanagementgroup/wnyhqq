@@ -241,18 +241,21 @@ async function fetchUserRequests() {
                     const fbDoc = safeId ? firebaseData[safeId] : null;
                     
                     if (fbDoc) {
+                        const mergedCommandStatus = fbDoc.commandStatus || req.commandStatus;
+                        // commandStatus เป็นหลัก: ถ้าออกคำสั่งแล้ว ให้ status เป็น 'เสร็จสิ้น' เสมอ
+                        const mergedStatus = mergedCommandStatus === 'เสร็จสิ้น'
+                            ? 'เสร็จสิ้น'
+                            : (fbDoc.status || req.status);
                         return {
                             ...req,
-                            // ใช้ลิงก์ล่าสุดจาก Firebase เสมอ
                             fileUrl: fbDoc.fileUrl || req.fileUrl,
                             pdfUrl: fbDoc.pdfUrl || req.pdfUrl,
-                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl, // เพิ่มตัวนี้ด้วย
-                            
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
                             completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
-                            status: fbDoc.status || req.status,
-                            commandStatus: fbDoc.commandStatus || req.commandStatus
+                            status: mergedStatus,
+                            commandStatus: mergedCommandStatus
                         };
                     }
                     return req;
@@ -327,9 +330,11 @@ function renderUserRequests(requests) {
         const completedCommandUrl = req.completedCommandUrl || req.commandPdfUrl || req.commandBookUrl;
         const dispatchBookUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
 
-        const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
-        const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-        const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
+        // commandStatus เป็นหลัก — ถ้าออกคำสั่งแล้วถือว่าเสร็จสิ้นทุกกรณี
+        const commandDone = req.commandStatus === 'เสร็จสิ้น' || !!completedCommandUrl;
+        const isCompleted = commandDone || (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || !!completedMemoUrl);
+        const isFixing = !commandDone && (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
+        const needsToSend = !commandDone && (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (completedCommandUrl) {
