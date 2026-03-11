@@ -762,7 +762,7 @@ function setupMemoModalLogic() {
         const fileRefDoc = document.getElementById('file-ref-doc');
         if (isNonReimburse) {
             nonReimburseContainer.classList.remove('hidden');
-            if (fileExchange) fileExchange.required = true;
+            if (fileExchange) fileExchange.required = false;
             if (fileRefDoc) fileRefDoc.required = true;
         } else {
             nonReimburseContainer.classList.add('hidden');
@@ -867,8 +867,8 @@ async function handleMemoSubmitFromModal(e) {
             // ถ้าเป็น Admin และมีการแนบไฟล์มาบางส่วน ก็ให้รวมไฟล์ตามปกติ
             
             if (!isAdmin) {
-                if (!fileSigned || !fileExchange || !fileRef) {
-                    throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. ไฟล์แลกคาบสอน\n3. หนังสือต้นเรื่อง");
+                if (!fileSigned || !fileRef) {
+                    throw new Error("กรุณาแนบไฟล์บังคับให้ครบถ้วน:\n1. บันทึกข้อความที่ลงนามแล้ว\n2. หนังสือต้นเรื่อง");
                 }
             }
 
