@@ -56,6 +56,7 @@ let allRequestsCache = [];
 let allMemosCache = [];
 let userMemosCache = [];
 let allUsersCache = [];
+let userRequestsCache = [];
 window.requestsChartInstance = null;
 window.statusChartInstance = null;
 let currentPublicWeeklyData = [];

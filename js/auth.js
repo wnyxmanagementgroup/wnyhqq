@@ -127,6 +127,11 @@ function initializeUserSession(user) {
         if (adminBtnUsers) adminBtnUsers.classList.add('hidden');
         if (adminActions) adminActions.classList.add('hidden');
     }
+
+    // 4. นำทางไปยังหน้าที่เหมาะสม
+    if (typeof updateSidebarForRole === 'function') {
+        updateSidebarForRole(user);
+    }
 }
 
 function showMainApp() {
