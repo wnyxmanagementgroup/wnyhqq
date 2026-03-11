@@ -237,8 +237,8 @@ async function fetchUserRequests() {
                 snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
                 requests = requests.map(req => {
-                    const safeId = req.id.replace(/[\/\\:\.]/g, '-');
-                    const fbDoc = firebaseData[safeId];
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
+                    const fbDoc = safeId ? firebaseData[safeId] : null;
                     
                     if (fbDoc) {
                         return {
@@ -1192,10 +1192,6 @@ async function resetRequestForm() {
     document.getElementById('form-doc-date').value = today;
     document.getElementById('form-start-date').value = today;
     document.getElementById('form-end-date').value = today;
-    document.getElementById('form-department').addEventListener('change', (e) => {
-        const selectedDept = e.target.value;
-        document.getElementById('form-head-name').value = specialPositionMap[selectedDept] || '';
-    });
 }
 
 function addAttendeeField() {

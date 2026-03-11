@@ -638,10 +638,11 @@ function convertToDirectLink(url) {
 // ฟังก์ชันสำหรับดูตัวอย่างรูปทันทีที่วางลิงก์
 function updateAnnouncementPreview(url) {
     const preview = document.getElementById('current-announcement-img-preview');
+    if (!preview) return;
     const img = preview.querySelector('img');
     const directUrl = convertToDirectLink(url);
-    
-    if (directUrl) {
+
+    if (directUrl && img) {
         preview.classList.remove('hidden');
         img.src = directUrl;
     }
@@ -754,17 +755,19 @@ function setupMemoModalLogic() {
     
     // ตั้งค่าเริ่มต้น
     const updateVisibility = () => {
-        const isNonReimburse = document.getElementById('memo_type_non_reimburse').checked;
+        const memoTypeEl = document.getElementById('memo_type_non_reimburse');
+        if (!memoTypeEl || !nonReimburseContainer) return;
+        const isNonReimburse = memoTypeEl.checked;
+        const fileExchange = document.getElementById('file-exchange');
+        const fileRefDoc = document.getElementById('file-ref-doc');
         if (isNonReimburse) {
             nonReimburseContainer.classList.remove('hidden');
-            // บังคับ Required
-            document.getElementById('file-exchange').required = true;
-            document.getElementById('file-ref-doc').required = true;
+            if (fileExchange) fileExchange.required = true;
+            if (fileRefDoc) fileRefDoc.required = true;
         } else {
             nonReimburseContainer.classList.add('hidden');
-            // ปลด Required
-            document.getElementById('file-exchange').required = false;
-            document.getElementById('file-ref-doc').required = false;
+            if (fileExchange) fileExchange.required = false;
+            if (fileRefDoc) fileRefDoc.required = false;
         }
     };
 

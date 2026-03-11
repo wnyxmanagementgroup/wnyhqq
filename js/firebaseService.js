@@ -153,6 +153,61 @@ async function generateCommandHybrid(data) {
     }
 }
 
+/**
+ * ฟังก์ชันสร้าง PDF จาก Template ผ่าน Cloud Run
+ * @param {string} templateName - ชื่อไฟล์ Template (เช่น 'template_memo.docx')
+ * @param {Object} data - ข้อมูลสำหรับเติมใน Template
+ * @returns {Promise<Blob>} - ไฟล์ PDF ที่สร้างเสร็จแล้ว
+ */
+async function generatePdfFromCloudRun(templateName, data) {
+    if (typeof PizZip === 'undefined' || typeof Docxtemplater === 'undefined') {
+        throw new Error("PizZip หรือ Docxtemplater ยังไม่โหลดเสร็จ กรุณารอสักครู่แล้วลองใหม่");
+    }
+
+    // โหลดไฟล์ Template จากเซิร์ฟเวอร์
+    const templateRes = await fetch(templateName);
+    if (!templateRes.ok) throw new Error(`ไม่สามารถโหลด Template: ${templateName} (${templateRes.status})`);
+    const templateArrayBuffer = await templateRes.arrayBuffer();
+
+    // ใช้ Docxtemplater ในการ Render Template
+    const zip = new PizZip(templateArrayBuffer);
+    const doc = new Docxtemplater(zip, {
+        paragraphLoop: true,
+        linebreaks: true,
+        nullGetter: () => ""
+    });
+
+    // เตรียมข้อมูล (ทำให้ค่า null/undefined กลายเป็น "")
+    const renderData = {};
+    Object.keys(data).forEach(key => {
+        const val = data[key];
+        renderData[key] = (val !== null && val !== undefined) ? String(val) : "";
+    });
+
+    doc.render(renderData);
+
+    const docxBlob = doc.getZip().generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    });
+
+    // ส่งไปที่ Cloud Run เพื่อแปลงเป็น PDF
+    const formPayload = new FormData();
+    formPayload.append("files", docxBlob, "document.docx");
+
+    const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
+        ? PDF_ENGINE_CONFIG.BASE_URL
+        : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
+
+    const response = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, {
+        method: "POST",
+        body: formPayload
+    });
+
+    if (!response.ok) throw new Error(`Cloud Run Error: ${response.status}`);
+    return await response.blob();
+}
+
 // Helper Function: แปลง Blob เป็น Base64 (เผื่อในไฟล์นี้ยังไม่มี)
 function blobToBase64(blob) {
   return new Promise((resolve, reject) => {
