@@ -1063,7 +1063,41 @@ async function generateOfficialPDF(requestData) {
 function renderUsersList(users) {
     const container = document.getElementById('users-content');
     if (!users || users.length === 0) { container.innerHTML = '<p class="text-center text-gray-500">ไม่พบข้อมูลผู้ใช้</p>'; return; }
-    container.innerHTML = `<div class="overflow-x-auto"><table class="min-w-full bg-white responsive-table"><thead><tr class="bg-gray-100"><th class="px-4 py-2 text-left">ชื่อผู้ใช้</th><th class="px-4 py-2 text-left">ชื่อ-นามสกุล</th><th class="px-4 py-2 text-left">ตำแหน่ง</th><th class="px-4 py-2 text-left">กลุ่มสาระ/งาน</th><th class="px-4 py-2 text-left">บทบาท</th><th class="px-4 py-2 text-left">การจัดการ</th></tr></thead><tbody>${users.map(user => `<tr class="border-b"><td class="px-4 py-2" data-label="ชื่อผู้ใช้">${escapeHtml(user.username)}</td><td class="px-4 py-2" data-label="ชื่อ-นามสกุล">${escapeHtml(user.fullName)}</td><td class="px-4 py-2" data-label="ตำแหน่ง">${escapeHtml(user.position)}</td><td class="px-4 py-2" data-label="กลุ่มสาระ">${escapeHtml(user.department)}</td><td class="px-4 py-2" data-label="บทบาท">${escapeHtml(user.role)}</td><td class="px-4 py-2" data-label="การจัดการ"><button onclick="deleteUser('${escapeHtml(user.username)}')" class="btn btn-danger btn-sm">ลบ</button></td></tr>`).join('')}</tbody></table></div>`;
+    container.innerHTML = `
+    <div class="overflow-x-auto">
+        <table class="min-w-full bg-white responsive-table">
+            <thead>
+                <tr class="bg-gray-100">
+                    <th class="px-4 py-2 text-left">ชื่อผู้ใช้</th>
+                    <th class="px-4 py-2 text-left">ชื่อ-นามสกุล</th>
+                    <th class="px-4 py-2 text-left">ตำแหน่ง</th>
+                    <th class="px-4 py-2 text-left">กลุ่มสาระ/งาน</th>
+                    <th class="px-4 py-2 text-left">บทบาท</th>
+                    <th class="px-4 py-2 text-left">การจัดการ</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${users.map(user => `
+                <tr class="border-b hover:bg-gray-50">
+                    <td class="px-4 py-2" data-label="ชื่อผู้ใช้"><span class="font-mono text-sm">${escapeHtml(user.username)}</span></td>
+                    <td class="px-4 py-2" data-label="ชื่อ-นามสกุล">${escapeHtml(user.fullName)}</td>
+                    <td class="px-4 py-2" data-label="ตำแหน่ง">${escapeHtml(user.position)}</td>
+                    <td class="px-4 py-2" data-label="กลุ่มสาระ">${escapeHtml(user.department)}</td>
+                    <td class="px-4 py-2" data-label="บทบาท">
+                        <span class="px-2 py-1 rounded-full text-xs font-bold ${user.role === 'admin' ? 'bg-purple-100 text-purple-700 border border-purple-200' : 'bg-blue-100 text-blue-700 border border-blue-200'}">
+                            ${escapeHtml(user.role)}
+                        </span>
+                    </td>
+                    <td class="px-4 py-2" data-label="การจัดการ">
+                        <div class="flex gap-2">
+                            <button onclick="openEditUserModal('${escapeHtml(user.username)}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm">✏️ แก้ไข</button>
+                            <button onclick="deleteUser('${escapeHtml(user.username)}')" class="btn btn-danger btn-sm">🗑️ ลบ</button>
+                        </div>
+                    </td>
+                </tr>`).join('')}
+            </tbody>
+        </table>
+    </div>`;
 }
 
 function renderAdminMemosList(memos) {
@@ -1119,8 +1153,102 @@ async function deleteUser(username) {
     }
 }
 
-function openAddUserModal() { 
-    document.getElementById('register-modal').style.display = 'flex'; 
+function openAddUserModal() {
+    document.getElementById('register-modal').style.display = 'flex';
+}
+
+function openEditUserModal(username) {
+    if (!checkAdminAccess()) return;
+
+    const user = allUsersCache.find(u => u.username === username);
+    if (!user) {
+        showAlert('ผิดพลาด', 'ไม่พบข้อมูลผู้ใช้');
+        return;
+    }
+
+    // เติมข้อมูลลงในฟอร์ม
+    document.getElementById('edit-user-original-username').value = user.username;
+    document.getElementById('edit-user-username').value = user.username;
+    document.getElementById('edit-user-loginname').value = user.loginName || '';
+    document.getElementById('edit-user-fullname').value = user.fullName || '';
+    document.getElementById('edit-user-position').value = user.position || '';
+    document.getElementById('edit-user-department').value = user.department || '';
+    document.getElementById('edit-user-email').value = user.email || '';
+    document.getElementById('edit-user-role').value = user.role || 'user';
+    document.getElementById('edit-user-password').value = '';
+    document.getElementById('edit-user-confirm-password').value = '';
+
+    document.getElementById('edit-user-modal').style.display = 'flex';
+}
+
+async function handleEditUserSubmit(e) {
+    e.preventDefault();
+    if (!checkAdminAccess()) return;
+
+    const originalUsername = document.getElementById('edit-user-original-username').value;
+    const fullName = document.getElementById('edit-user-fullname').value.trim();
+    const loginName = document.getElementById('edit-user-loginname').value.trim();
+    const position = document.getElementById('edit-user-position').value.trim();
+    const department = document.getElementById('edit-user-department').value.trim();
+    const email = document.getElementById('edit-user-email').value.trim();
+    const role = document.getElementById('edit-user-role').value;
+    const newPassword = document.getElementById('edit-user-password').value;
+    const confirmPassword = document.getElementById('edit-user-confirm-password').value;
+
+    if (newPassword && newPassword !== confirmPassword) {
+        showAlert('ผิดพลาด', 'รหัสผ่านใหม่ไม่ตรงกัน');
+        return;
+    }
+
+    toggleLoader('edit-user-submit-button', true);
+
+    try {
+        const payload = {
+            username: originalUsername,
+            loginName: loginName || originalUsername,
+            fullName,
+            position,
+            department,
+            email,
+            role,
+            adminEdit: true  // Flag บอก backend ว่าเป็นการแก้ไขโดย Admin
+        };
+
+        if (newPassword) {
+            payload.newPassword = newPassword;
+        }
+
+        const result = await apiCall('POST', 'updateUserProfile', payload);
+
+        if (result.status === 'success') {
+            // อัปเดต Firestore ด้วย (ถ้ามี)
+            if (typeof db !== 'undefined') {
+                try {
+                    const snapshot = await db.collection('users')
+                        .where('username', '==', originalUsername)
+                        .get();
+                    if (!snapshot.empty) {
+                        const updateData = { fullName, position, department, email, role, loginName: loginName || originalUsername };
+                        await snapshot.docs[0].ref.set(updateData, { merge: true });
+                    }
+                } catch (fbErr) {
+                    console.warn('Firestore user update warning:', fbErr);
+                }
+            }
+
+            showAlert('สำเร็จ', 'แก้ไขข้อมูลผู้ใช้เรียบร้อยแล้ว');
+            document.getElementById('edit-user-modal').style.display = 'none';
+            document.getElementById('edit-user-form').reset();
+            await fetchAllUsers();
+        } else {
+            throw new Error(result.message || 'ไม่สามารถแก้ไขข้อมูลได้');
+        }
+    } catch (error) {
+        console.error('Edit user error:', error);
+        showAlert('ผิดพลาด', error.message);
+    } finally {
+        toggleLoader('edit-user-submit-button', false);
+    }
 }
 
 function downloadUserTemplate() {

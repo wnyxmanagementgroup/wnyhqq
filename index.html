@@ -984,6 +984,80 @@
     </div>
 </div>
 
+<!-- Edit User Modal (Admin Only) -->
+<div id="edit-user-modal" class="modal">
+    <div class="modal-content">
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl font-bold">✏️ แก้ไขข้อมูลผู้ใช้</h3>
+            <button id="edit-user-modal-close-button" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+        </div>
+        <form id="edit-user-form">
+            <input type="hidden" id="edit-user-original-username">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="form-label">ชื่อผู้ใช้ (Username)</label>
+                    <input type="text" id="edit-user-username" class="form-input bg-gray-100 cursor-not-allowed" readonly>
+                    <p class="text-xs text-gray-500 mt-1">ไม่สามารถเปลี่ยนชื่อผู้ใช้ได้</p>
+                </div>
+                <div>
+                    <label class="form-label">ชื่อ Login (สำหรับเข้าสู่ระบบ)</label>
+                    <input type="text" id="edit-user-loginname" class="form-input" placeholder="ถ้าว่างจะใช้ username">
+                </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label">ชื่อ-นามสกุล <span class="text-red-500">*</span></label>
+                <input type="text" id="edit-user-fullname" class="form-input" required>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="form-label">ตำแหน่ง <span class="text-red-500">*</span></label>
+                    <input type="text" id="edit-user-position" class="form-input" required>
+                </div>
+                <div>
+                    <label class="form-label">กลุ่มสาระ/งาน</label>
+                    <input type="text" id="edit-user-department" class="form-input">
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="form-label">อีเมล</label>
+                    <input type="email" id="edit-user-email" class="form-input">
+                </div>
+                <div>
+                    <label class="form-label">บทบาท (Role) <span class="text-red-500">*</span></label>
+                    <select id="edit-user-role" class="form-input" required>
+                        <option value="user">user (ผู้ใช้ทั่วไป)</option>
+                        <option value="admin">admin (ผู้ดูแลระบบ)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="form-label">รหัสผ่านใหม่</label>
+                    <input type="password" id="edit-user-password" class="form-input" placeholder="เว้นว่างถ้าไม่ต้องการเปลี่ยน">
+                </div>
+                <div>
+                    <label class="form-label">ยืนยันรหัสผ่านใหม่</label>
+                    <input type="password" id="edit-user-confirm-password" class="form-input" placeholder="เว้นว่างถ้าไม่ต้องการเปลี่ยน">
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-4 mt-6">
+                <button type="button" id="edit-user-cancel-button" class="btn bg-gray-500 text-white">ยกเลิก</button>
+                <button type="submit" id="edit-user-submit-button" class="btn btn-primary">
+                    <div id="edit-user-loader" class="loader hidden"></div>
+                    <span>บันทึกการแก้ไข</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
         <div id="alert-modal" class="modal">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-4">

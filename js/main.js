@@ -356,6 +356,9 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
 
     // --- Admin User Mgmt ---
     document.getElementById('add-user-button')?.addEventListener('click', openAddUserModal);
+    document.getElementById('edit-user-modal-close-button')?.addEventListener('click', () => document.getElementById('edit-user-modal').style.display = 'none');
+    document.getElementById('edit-user-cancel-button')?.addEventListener('click', () => document.getElementById('edit-user-modal').style.display = 'none');
+    document.getElementById('edit-user-form')?.addEventListener('submit', handleEditUserSubmit);
     document.getElementById('download-user-template-button')?.addEventListener('click', downloadUserTemplate);
     document.getElementById('import-users-button')?.addEventListener('click', () => document.getElementById('user-excel-input').click());
     document.getElementById('user-excel-input')?.addEventListener('change', handleUserImport);
