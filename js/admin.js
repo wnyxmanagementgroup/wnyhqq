@@ -182,22 +182,45 @@ async function fetchAllMemos() {
         const result = await apiCall('GET', 'getAllMemos');
         if (result.status === 'success') {
             let memos = result.data || [];
-            
-            // เรียงลำดับ (ล่าสุดขึ้นก่อน) -> ถูกต้องแล้ว
+
+            // Merge ข้อมูลจาก Firestore เพื่อให้ได้ URL ไฟล์และสถานะล่าสุด
+            if (typeof db !== 'undefined') {
+                try {
+                    const snapshot = await db.collection('memos').get();
+                    const fbData = {};
+                    snapshot.forEach(doc => { fbData[doc.id] = doc.data(); });
+
+                    memos = memos.map(memo => {
+                        const safeId = memo.id ? memo.id.replace(/[\/\\:\.]/g, '-') : '';
+                        const fbMemo = fbData[safeId];
+                        if (fbMemo) {
+                            return {
+                                ...memo,
+                                status: fbMemo.status || memo.status,
+                                completedMemoUrl: fbMemo.completedMemoUrl || memo.completedMemoUrl,
+                                completedCommandUrl: fbMemo.completedCommandUrl || memo.completedCommandUrl,
+                                dispatchBookUrl: fbMemo.dispatchBookUrl || memo.dispatchBookUrl,
+                                fileURL: fbMemo.fileURL || fbMemo.pdfUrl || memo.fileURL,
+                            };
+                        }
+                        return memo;
+                    });
+                } catch(fbErr) {
+                    console.warn('⚠️ Firestore memos merge failed:', fbErr);
+                }
+            }
+
             memos.sort((a, b) => {
                 const timeA = new Date(a.timestamp || 0).getTime();
                 const timeB = new Date(b.timestamp || 0).getTime();
-                return timeB - timeA; 
+                return timeB - timeA;
             });
-            
-            // ★★★ จุดที่ต้องเพิ่ม: อัปเดตตัวแปร Global Cache ★★★
-            allMemosCache = memos;
-            // ------------------------------------------------
 
+            allMemosCache = memos;
             renderAdminMemosList(memos);
         }
-    } catch (error) { 
-        showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลบันทึกข้อความได้'); 
+    } catch (error) {
+        showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลบันทึกข้อความได้');
     }
 }
 
@@ -1530,29 +1553,59 @@ async function sendCompletionEmail(requestId, username, status) {
 async function openAdminGenerateCommand(requestId) {
     try {
         if (!checkAdminAccess()) return;
-        
+
         document.getElementById('admin-command-result').classList.add('hidden');
         document.getElementById('admin-command-form').classList.remove('hidden');
         document.getElementById('admin-command-attendees-list').innerHTML = '';
-        
-        const result = await apiCall('GET', 'getDraftRequest', { requestId: requestId });
-        
+
+        const safeId = requestId.replace(/[\/\\:\.]/g, '-');
+
+        // ดึงข้อมูลจาก GAS และ Firestore พร้อมกัน
+        const [result, fbDoc] = await Promise.all([
+            apiCall('GET', 'getDraftRequest', { requestId: requestId }),
+            (typeof db !== 'undefined')
+                ? db.collection('requests').doc(safeId).get().catch(() => null)
+                : Promise.resolve(null)
+        ]);
+
         if (result.status === 'success' && result.data) {
             let data = result.data;
             if (result.data.data) data = result.data.data;
 
+            // Merge ข้อมูลจาก Firestore (ผู้ใช้แก้ไขล่าสุด) ทับข้อมูลจาก GAS
+            if (fbDoc && fbDoc.exists) {
+                const fbData = fbDoc.data();
+                // ใช้ค่าจาก Firestore สำหรับฟิลด์ที่ผู้ใช้สามารถแก้ไขได้
+                if (fbData.requesterName) data.requesterName = fbData.requesterName;
+                if (fbData.requesterPosition) data.requesterPosition = fbData.requesterPosition;
+                if (fbData.location) data.location = fbData.location;
+                if (fbData.purpose) data.purpose = fbData.purpose;
+                if (fbData.startDate) data.startDate = fbData.startDate;
+                if (fbData.endDate) data.endDate = fbData.endDate;
+
+                // ใช้รายชื่อจาก Firestore ถ้ามีและไม่ว่าง (ผู้ใช้แก้ไขเพิ่มเติม)
+                if (fbData.attendees) {
+                    let fbAttendees = [];
+                    if (Array.isArray(fbData.attendees)) fbAttendees = fbData.attendees;
+                    else if (typeof fbData.attendees === 'string') {
+                        try { fbAttendees = JSON.parse(fbData.attendees); } catch(e) {}
+                    }
+                    if (fbAttendees.length > 0) data.attendees = fbAttendees;
+                }
+            }
+
             document.getElementById('admin-command-request-id').value = requestId;
             document.getElementById('admin-command-request-id-display').value = requestId;
-            
-            const toInputDate = (dateStr) => { 
-                if(!dateStr) return ''; 
-                const d = new Date(dateStr); 
-                return !isNaN(d) ? d.toISOString().split('T')[0] : ''; 
+
+            const toInputDate = (dateStr) => {
+                if(!dateStr) return '';
+                const d = new Date(dateStr);
+                return !isNaN(d) ? d.toISOString().split('T')[0] : '';
             };
-            
+
             const docDateInput = document.getElementById('admin-command-doc-date');
             docDateInput.value = toInputDate(data.docDate);
-            docDateInput.readOnly = true; 
+            docDateInput.readOnly = true;
             docDateInput.classList.add('bg-gray-100', 'cursor-not-allowed', 'text-gray-500');
 
             document.getElementById('admin-command-requester-name').value = data.requesterName || '';
@@ -1561,45 +1614,45 @@ async function openAdminGenerateCommand(requestId) {
             document.getElementById('admin-command-purpose').value = data.purpose || '';
             document.getElementById('admin-command-start-date').value = toInputDate(data.startDate);
             document.getElementById('admin-command-end-date').value = toInputDate(data.endDate);
-            
-            if (data.attendees && Array.isArray(data.attendees)) { 
-                data.attendees.forEach(att => addAdminAttendeeField(att.name, att.position)); 
+
+            if (data.attendees && Array.isArray(data.attendees)) {
+                data.attendees.forEach(att => addAdminAttendeeField(att.name, att.position));
             } else if (typeof data.attendees === 'string') {
                 try {
                     JSON.parse(data.attendees).forEach(att => addAdminAttendeeField(att.name, att.position));
                 } catch(e) {}
             }
-            
+
             document.getElementById('admin-expense-option').value = data.expenseOption || 'no';
             document.getElementById('admin-expense-items').value = typeof data.expenseItems === 'object' ? JSON.stringify(data.expenseItems) : (data.expenseItems || '[]');
             document.getElementById('admin-total-expense').value = data.totalExpense || 0;
             document.getElementById('admin-vehicle-option').value = data.vehicleOption || 'gov';
             document.getElementById('admin-license-plate').value = data.licensePlate || '';
-            
-            const vehicleText = data.vehicleOption === 'gov' ? 'รถราชการ' : 
+
+            const vehicleText = data.vehicleOption === 'gov' ? 'รถราชการ' :
                               data.vehicleOption === 'private' ? ('รถส่วนตัว ' + (data.licensePlate||'')) : 'อื่นๆ';
             document.getElementById('admin-command-vehicle-info').textContent = `พาหนะ: ${vehicleText}`;
-            
+
             await switchPage('admin-generate-command-page');
-            
+
             const addBtn = document.getElementById('admin-add-attendee-btn');
-            const newBtn = addBtn.cloneNode(true); 
+            const newBtn = addBtn.cloneNode(true);
             addBtn.parentNode.replaceChild(newBtn, addBtn);
             newBtn.addEventListener('click', () => addAdminAttendeeField());
-            
-        } else { 
-            showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลคำขอได้'); 
+
+        } else {
+            showAlert('ผิดพลาด', 'ไม่สามารถโหลดข้อมูลคำขอได้');
         }
-    } catch (error) { 
+    } catch (error) {
         console.error(error);
-        showAlert('ผิดพลาด', 'เกิดข้อผิดพลาด: ' + error.message); 
+        showAlert('ผิดพลาด', 'เกิดข้อผิดพลาด: ' + error.message);
     }
 }
 
 function addAdminAttendeeField(name = '', position = '') {
     const list = document.getElementById('admin-command-attendees-list');
     if (!list) return;
-    
+
     const div = document.createElement('div');
     div.className = 'grid grid-cols-1 md:grid-cols-2 gap-2 mb-2 items-center bg-gray-50 p-2 rounded border border-gray-200';
     div.innerHTML = `
@@ -1610,6 +1663,57 @@ function addAdminAttendeeField(name = '', position = '') {
         </div>
     `;
     list.appendChild(div);
+}
+
+function importAttendeesFromFile(input) {
+    const file = input.files[0];
+    if (!file) return;
+    input.value = ''; // รีเซ็ต input เพื่อให้เลือกไฟล์เดิมซ้ำได้
+
+    const ext = file.name.split('.').pop().toLowerCase();
+
+    if (ext === 'csv') {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const lines = e.target.result.split('\n').map(l => l.trim()).filter(l => l);
+            // ข้ามหัวตาราง (บรรทัดแรก) ถ้ามี
+            const startRow = (lines[0].toLowerCase().includes('ชื่อ') || lines[0].toLowerCase().includes('name')) ? 1 : 0;
+            let count = 0;
+            for (let i = startRow; i < lines.length; i++) {
+                const cols = lines[i].split(',').map(c => c.replace(/^["']|["']$/g, '').trim());
+                const name = cols[0] || '';
+                const position = cols[1] || '';
+                if (name) { addAdminAttendeeField(name, position); count++; }
+            }
+            if (count > 0) showAlert('สำเร็จ', `นำเข้ารายชื่อสำเร็จ ${count} คน`);
+            else showAlert('แจ้งเตือน', 'ไม่พบข้อมูลในไฟล์ CSV\nรูปแบบที่รองรับ: คอลัมน์ A = ชื่อ-นามสกุล, คอลัมน์ B = ตำแหน่ง');
+        };
+        reader.readAsText(file, 'UTF-8');
+    } else if (ext === 'xlsx' || ext === 'xls') {
+        if (typeof XLSX === 'undefined') {
+            showAlert('ผิดพลาด', 'ไม่พบ XLSX Library กรุณาโหลดหน้าเว็บใหม่');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const wb = XLSX.read(e.target.result, { type: 'array' });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            // ตรวจว่าแถวแรกเป็น header หรือไม่
+            const startRow = (rows.length > 0 && (String(rows[0][0]).toLowerCase().includes('ชื่อ') || String(rows[0][0]).toLowerCase().includes('name'))) ? 1 : 0;
+            let count = 0;
+            for (let i = startRow; i < rows.length; i++) {
+                const name = String(rows[i][0] || '').trim();
+                const position = String(rows[i][1] || '').trim();
+                if (name) { addAdminAttendeeField(name, position); count++; }
+            }
+            if (count > 0) showAlert('สำเร็จ', `นำเข้ารายชื่อสำเร็จ ${count} คน`);
+            else showAlert('แจ้งเตือน', 'ไม่พบข้อมูลในไฟล์\nรูปแบบที่รองรับ: คอลัมน์ A = ชื่อ-นามสกุล, คอลัมน์ B = ตำแหน่ง');
+        };
+        reader.readAsArrayBuffer(file);
+    } else {
+        showAlert('ผิดพลาด', 'รองรับเฉพาะไฟล์ .xlsx, .xls และ .csv เท่านั้น');
+    }
 }
 
 function showDualLinkResult(containerId, title, docUrl, pdfUrl) {

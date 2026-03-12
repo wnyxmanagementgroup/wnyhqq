@@ -706,7 +706,11 @@
         <fieldset class="border p-4 rounded-lg mb-6 bg-white/50">
             <legend>ผู้ร่วมเดินทาง (แก้ไขได้)</legend>
             <div id="admin-command-attendees-list"></div>
-            <button type="button" id="admin-add-attendee-btn" class="btn btn-sm btn-success mt-2">+ เพิ่มผู้ร่วมเดินทาง</button>
+            <div class="flex flex-wrap gap-2 mt-2">
+                <button type="button" id="admin-add-attendee-btn" class="btn btn-sm btn-success">+ เพิ่มผู้ร่วมเดินทาง</button>
+                <button type="button" onclick="document.getElementById('admin-import-attendees-file').click()" class="btn btn-sm bg-blue-500 hover:bg-blue-600 text-white">📥 นำเข้าจากไฟล์ Excel</button>
+                <input type="file" id="admin-import-attendees-file" accept=".xlsx,.xls,.csv" class="hidden" onchange="importAttendeesFromFile(this)">
+            </div>
         </fieldset>
         
         <fieldset class="border p-4 rounded-lg mb-6 bg-gray-100">
