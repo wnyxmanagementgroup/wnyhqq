@@ -306,11 +306,27 @@ async function handleAdminGenerateCommand() {
         if (pdfUpload.status === 'success') {
             requestData.preGeneratedPdfUrl = pdfUpload.url;
             requestData.preGeneratedDocUrl = docUpload.url;
-            
-            // ส่งข้อมูลไป GAS (เพื่อบันทึกใน Sheet)
-            await apiCall('POST', 'approveCommand', requestData);
-            
-            // ★★★ (สำคัญ) บันทึกข้อมูล (รวมรายชื่อ) ลง Firebase ทันที ★★★
+
+            // ส่งข้อมูลไป GAS — แยก try/catch เพื่อไม่ให้ row-out-of-bounds บล็อก Firestore
+            try {
+                await apiCall('POST', 'approveCommand', requestData);
+            } catch (gasErr) {
+                console.warn('⚠️ approveCommand GAS error (fallback to updateRequest):', gasErr.message);
+                // Fallback: อัปเดตเฉพาะ commandStatus + URL ผ่าน updateRequest
+                try {
+                    await apiCall('POST', 'updateRequest', {
+                        id: requestId,
+                        commandStatus: 'เสร็จสิ้น',
+                        status: 'เสร็จสิ้น',
+                        commandPdfUrl: pdfUpload.url,
+                        attendees: JSON.stringify(attendees)
+                    });
+                } catch (fallbackErr) {
+                    console.warn('⚠️ updateRequest fallback also failed:', fallbackErr.message);
+                }
+            }
+
+            // บันทึกลง Firestore เสมอ ไม่ว่า GAS จะสำเร็จหรือไม่
             const safeId = requestId.replace(/[\/\\:\.]/g, '-');
             if (typeof db !== 'undefined') {
                 await db.collection('requests').doc(safeId).set({
@@ -321,7 +337,7 @@ async function handleAdminGenerateCommand() {
                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                 }, { merge: true });
             }
-            
+
             showAlert('สำเร็จ', 'บันทึกข้อมูลเรียบร้อยแล้ว');
             await fetchAllRequestsForCommand();
         }
