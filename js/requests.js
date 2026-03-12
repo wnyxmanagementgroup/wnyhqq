@@ -1325,32 +1325,28 @@ function getRequestFormData() {
         requesterName: document.getElementById('form-requester-name')?.value.trim(),
         requesterPosition: document.getElementById('form-requester-position')?.value.trim(),
         location: document.getElementById('form-location')?.value.trim(),
-       // เพิ่มฟิลด์จังหวัดและที่พัก
-        province: document.getElementById('form-province')?.value,
+        province: province,
         stayAt: document.getElementById('form-stay-at')?.value.trim(),
-        // ข้อมูลยานพาหนะ (สำหรับหนังสือส่ง) - เพิ่มใหม่
         dispatchVehicleType: document.getElementById('form-dispatch-vehicle-type')?.value.trim(),
         dispatchVehicleId: document.getElementById('form-dispatch-vehicle-id')?.value.trim(),
 
         purpose: document.getElementById('form-purpose')?.value.trim(),
         startDate: document.getElementById('form-start-date')?.value,
         endDate: document.getElementById('form-end-date')?.value,
-        
-        // เพิ่มเวลา (ถ้ามีใน HTML แล้ว)
+
         startTime: document.getElementById('form-start-time')?.value || '06:00',
         endTime: document.getElementById('form-end-time')?.value || '18:00',
-        
+
         attendees: attendees,
-        
+
         expenseOption: expenseOption,
         expenseItems: expenseItems,
         totalExpense: document.getElementById('form-total-expense')?.value || 0,
-        
+
         vehicleOption: vehicleOption,
-        vehicleOption: document.querySelector('input[name="vehicle_option"]:checked')?.value || 'gov',
         licensePlate: document.getElementById('form-license-plate')?.value || '',
-        publicVehicleDetails: document.getElementById('public-vehicle-details-input')?.value || '', 
-        
+        publicVehicleDetails: document.getElementById('public-vehicle-details-input')?.value || '',
+
         department: document.getElementById('form-department')?.value,
         headName: document.getElementById('form-head-name')?.value
     };
@@ -1811,7 +1807,8 @@ async function saveEditRequest() {
             data: finalBase64,
             filename: filename,
             mimeType: 'application/pdf',
-            username: formData.username
+            username: formData.username,
+            requestId: formData.requestId
         });
 
         if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ");

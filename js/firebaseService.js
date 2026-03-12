@@ -208,16 +208,3 @@ async function generatePdfFromCloudRun(templateName, data) {
     if (!response.ok) throw new Error(`Cloud Run Error: ${response.status}`);
     return await response.blob();
 }
-
-// Helper Function: แปลง Blob เป็น Base64 (เผื่อในไฟล์นี้ยังไม่มี)
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        const base64String = reader.result.split(',')[1]; 
-        resolve(base64String);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
