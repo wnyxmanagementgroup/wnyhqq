@@ -226,29 +226,29 @@ async function fetchUserRequests() {
 
         let requests = (result.status === 'success') ? result.data || [] : [];
 
-        // 2. ดึงข้อมูลจาก Firebase มาทับ (เพื่อให้ได้ลิงก์ล่าสุดแบบ Real-time)
-        if (typeof db !== 'undefined') {
+        // 2. ดึงข้อมูลจาก Firebase มาทับ (fetch ตาม ID โดยตรงเพื่อให้ได้ลิงก์ล่าสุดแบบ Real-time)
+        if (typeof db !== 'undefined' && requests.length > 0) {
             try {
-                const snapshot = await db.collection('requests')
-                    .where('username', '==', user.username)
-                    .get();
-                
                 const firebaseData = {};
-                snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
+                await Promise.all(requests.map(async (req) => {
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
+                    if (!safeId) return;
+                    const doc = await db.collection('requests').doc(safeId).get();
+                    if (doc.exists) firebaseData[safeId] = doc.data();
+                }));
 
                 requests = requests.map(req => {
                     const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
                     const fbDoc = safeId ? firebaseData[safeId] : null;
-                    
+
                     if (fbDoc) {
                         return {
                             ...req,
-                            // ใช้ลิงก์ล่าสุดจาก Firebase เสมอ
                             fileUrl: fbDoc.fileUrl || req.fileUrl,
                             pdfUrl: fbDoc.pdfUrl || req.pdfUrl,
-                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl, // เพิ่มตัวนี้ด้วย
-                            
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
                             completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
+                            completedCommandUrl: fbDoc.completedCommandUrl || req.completedCommandUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
                             status: fbDoc.status || req.status,
