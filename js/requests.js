@@ -340,10 +340,11 @@ function renderUserRequests(requests) {
         const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
-        if (completedCommandUrl) {
-            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
-        } else if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            // สถานะนี้ต้องแสดงก่อนเสมอ แม้จะมี completedCommandUrl
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ เสร็จสิ้น/รับไฟล์ไปใช้งาน</span>`;
+        } else if (completedCommandUrl) {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
         } else if (isCompleted) {
              statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">☑️ ส่งแล้ว (รอคำสั่ง)</span>`;
         } else if (req.status === 'ไม่อนุมัติ') {

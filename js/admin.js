@@ -1351,7 +1351,7 @@ async function handleAdminMemoActionSubmit(e) {
         });
         
         if (result.status === 'success') {
-            const urls = result.data || {}; 
+            const urls = result.data || {};
             const safeId = memoId.replace(/[\/\\:\.]/g, '-');
 
             if (typeof db !== 'undefined') {
@@ -1361,17 +1361,27 @@ async function handleAdminMemoActionSubmit(e) {
                  if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
                  if (urls.dispatchBookUrl) updateData.adminDispatchUrl = urls.dispatchBookUrl;
 
+                 // หา refNumber จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
+                 // (memo.id อาจ ≠ req.id ที่ผู้ใช้ใช้ fetch)
+                 const memoEntry = allMemosCache.find(m => m.id === memoId);
+                 const refNumber = memoEntry?.refNumber;
+                 const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
+
                  try {
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });
                     await db.collection('requests').doc(safeId).set(updateData, { merge: true });
+                    // save ด้วย refNumber key ด้วย เผื่อ req.id = refNumber
+                    if (safeRefId && safeRefId !== safeId) {
+                        await db.collection('requests').doc(safeRefId).set(updateData, { merge: true });
+                    }
                  } catch (e) { console.warn("Firestore update error:", e); }
             }
 
-            if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') { 
-                const memo = allMemosCache.find(m => m.id === memoId); 
-                if (memo && memo.submittedBy) { 
-                    await sendCompletionEmail(memo.refNumber, memo.submittedBy, status); 
-                } 
+            if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+                const memo = allMemosCache.find(m => m.id === memoId);
+                if (memo && memo.submittedBy) {
+                    await sendCompletionEmail(memo.refNumber, memo.submittedBy, status);
+                }
             }
             showAlert('สำเร็จ', 'อัปเดตสถานะและไฟล์เรียบร้อยแล้ว'); 
             document.getElementById('admin-memo-action-modal').style.display = 'none'; 
