@@ -366,33 +366,50 @@ function renderUserRequests(requests) {
         }
 
         // ปุ่มดูไฟล์
-        if (completedMemoUrl) {
-            // กรณีส่งเสร็จแล้ว
-            actionButtons += `
+        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            // แสดงเฉพาะไฟล์ที่แอดมินอัพโหลดให้
+            if (completedMemoUrl) {
+                actionButtons += `
                 <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
-                    📄 ดูบันทึก (ฉบับส่ง)
+                    📄 บันทึกข้อความ (สมบูรณ์)
                 </a>`;
-        } else if (draftMemoUrl && !isCompleted) {
-            // ★★★ แก้ไขจุดนี้: เปลี่ยนจาก "พิมพ์ร่าง" เป็น "ดูบันทึก" เพื่อให้ตรงความต้องการ ★★★
-            actionButtons += `
-                <a href="${draftMemoUrl}" target="_blank" class="btn bg-teal-600 text-white hover:bg-teal-700 border border-teal-200 btn-sm flex items-center gap-1 shadow-sm">
-                    📄 ดูบันทึก (ฉบับร่าง/แก้ไข)
-                </a>`;
-        }
-        // [C] ปุ่มคำสั่ง (ถ้ามี)
-        if (completedCommandUrl) {
-            actionButtons += `
+            }
+            if (completedCommandUrl) {
+                actionButtons += `
                 <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
-                    📋 คำสั่ง
+                    📋 คำสั่ง (สมบูรณ์)
                 </a>`;
-        }
-
-        // [D] ปุ่มหนังสือส่ง (ถ้ามี)
-        if (dispatchBookUrl) {
-            actionButtons += `
+            }
+            if (dispatchBookUrl) {
+                actionButtons += `
                 <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
                     📦 หนังสือส่ง
                 </a>`;
+            }
+        } else {
+            if (completedMemoUrl) {
+                actionButtons += `
+                <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
+                    📄 ดูบันทึก (ฉบับส่ง)
+                </a>`;
+            } else if (draftMemoUrl && !isCompleted) {
+                actionButtons += `
+                <a href="${draftMemoUrl}" target="_blank" class="btn bg-teal-600 text-white hover:bg-teal-700 border border-teal-200 btn-sm flex items-center gap-1 shadow-sm">
+                    📄 ดูบันทึก (ฉบับร่าง/แก้ไข)
+                </a>`;
+            }
+            if (completedCommandUrl) {
+                actionButtons += `
+                <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
+                    📋 คำสั่ง
+                </a>`;
+            }
+            if (dispatchBookUrl) {
+                actionButtons += `
+                <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
+                    📦 หนังสือส่ง
+                </a>`;
+            }
         }
 
         // --- 3. เงื่อนไขการแก้ไข/ลบ ---
