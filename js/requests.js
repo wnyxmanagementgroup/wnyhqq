@@ -251,6 +251,10 @@ async function fetchUserRequests() {
                             completedCommandUrl: fbDoc.completedCommandUrl || req.completedCommandUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
+                            // field แยกสำหรับไฟล์ที่แอดมินอัพโหลดให้โดยเฉพาะ
+                            adminMemoUrl: fbDoc.adminMemoUrl || req.adminMemoUrl,
+                            adminCommandUrl: fbDoc.adminCommandUrl || req.adminCommandUrl,
+                            adminDispatchUrl: fbDoc.adminDispatchUrl || req.adminDispatchUrl,
                             status: fbDoc.status || req.status,
                             commandStatus: fbDoc.commandStatus || req.commandStatus
                         };
@@ -322,10 +326,14 @@ function renderUserRequests(requests) {
         const safeId = escapeHtml(req.id || 'รอเลขที่');
         
         // ลิงก์ไฟล์ต่างๆ
-        const completedMemoUrl = req.completedMemoUrl; 
+        const completedMemoUrl = req.completedMemoUrl;
         const draftMemoUrl = req.fileUrl || req.pdfUrl || req.memoPdfUrl; // ลิงก์ไฟล์ที่สร้างจากการแก้ไขจะอยู่ที่นี่
         const completedCommandUrl = req.completedCommandUrl || req.commandPdfUrl || req.commandBookUrl;
         const dispatchBookUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
+        // ไฟล์ที่แอดมินอัพโหลดให้โดยเฉพาะ (field แยก ไม่ปะปนกับไฟล์ผู้ใช้)
+        const adminMemoUrl = req.adminMemoUrl;
+        const adminCommandUrl = req.adminCommandUrl;
+        const adminDispatchUrl = req.adminDispatchUrl;
 
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
@@ -367,22 +375,22 @@ function renderUserRequests(requests) {
 
         // ปุ่มดูไฟล์
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
-            // แสดงเฉพาะไฟล์ที่แอดมินอัพโหลดให้
-            if (completedMemoUrl) {
+            // แสดงเฉพาะไฟล์ที่แอดมินอัพโหลดให้ (ใช้ adminMemoUrl/adminCommandUrl/adminDispatchUrl)
+            if (adminMemoUrl) {
                 actionButtons += `
-                <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${adminMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
                     📄 บันทึกข้อความ (สมบูรณ์)
                 </a>`;
             }
-            if (completedCommandUrl) {
+            if (adminCommandUrl) {
                 actionButtons += `
-                <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${adminCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
                     📋 คำสั่ง (สมบูรณ์)
                 </a>`;
             }
-            if (dispatchBookUrl) {
+            if (adminDispatchUrl) {
                 actionButtons += `
-                <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${adminDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
                     📦 หนังสือส่ง
                 </a>`;
             }

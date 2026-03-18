@@ -1356,9 +1356,10 @@ async function handleAdminMemoActionSubmit(e) {
 
             if (typeof db !== 'undefined') {
                  const updateData = { status: status };
-                 if (urls.completedMemoUrl) updateData.completedMemoUrl = urls.completedMemoUrl;
-                 if (urls.completedCommandUrl) updateData.completedCommandUrl = urls.completedCommandUrl;
-                 if (urls.dispatchBookUrl) updateData.dispatchBookUrl = urls.dispatchBookUrl;
+                 // บันทึกไฟล์ที่แอดมินอัพโหลดลง field แยกต่างหาก ไม่ปะปนกับไฟล์ของผู้ใช้
+                 if (urls.completedMemoUrl) updateData.adminMemoUrl = urls.completedMemoUrl;
+                 if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
+                 if (urls.dispatchBookUrl) updateData.adminDispatchUrl = urls.dispatchBookUrl;
 
                  try {
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });
