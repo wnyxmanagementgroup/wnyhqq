@@ -349,7 +349,12 @@ function renderUserRequests(requests) {
 
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-        const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
+        // ต้องส่ง: มี draftMemoUrl + ยังไม่ส่ง (completedMemoUrl)
+        // หรือ: ยังไม่มีไฟล์เลย + ยังไม่ส่ง (ให้ user แนบเองได้)
+        // หรือ: ตีกลับมาแก้ไข
+        const hasPendingId = req.id && req.id !== 'รอเลขที่';
+        const notSentYet = !completedMemoUrl && !isCompleted && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก';
+        const needsToSend = (notSentYet && hasPendingId) || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
