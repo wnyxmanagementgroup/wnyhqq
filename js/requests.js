@@ -226,20 +226,33 @@ async function fetchUserRequests() {
 
         let requests = (result.status === 'success') ? result.data || [] : [];
 
-        // 2. ดึงข้อมูลจาก Firebase มาทับ (fetch ตาม ID โดยตรงเพื่อให้ได้ลิงก์ล่าสุดแบบ Real-time)
-        if (typeof db !== 'undefined' && requests.length > 0) {
+        // 2. ดึงข้อมูลจาก Firebase มาทับ — ใช้ query .where('username') เพื่อให้ security rules ผ่าน
+        if (typeof db !== 'undefined' && user && user.username) {
             try {
+                const snapshot = await db.collection('requests')
+                    .where('username', '==', user.username)
+                    .get();
+
+                // สร้าง lookup map โดยใช้ id field เป็น key (ตรงกับ req.id จาก GAS)
                 const firebaseData = {};
-                await Promise.all(requests.map(async (req) => {
-                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
-                    if (!safeId) return;
-                    const doc = await db.collection('requests').doc(safeId).get();
-                    if (doc.exists) firebaseData[safeId] = doc.data();
-                }));
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // map ด้วยทั้ง id field และ doc.id (safeId) เพื่อ match ได้แน่นอน
+                    const reqId = data.id || data.requestId;
+                    if (reqId) {
+                        firebaseData[reqId] = data;
+                        // เก็บด้วย safeId รูปแบบ (/→-) เผื่อ key ไม่ตรง
+                        const safeKey = reqId.replace(/[\/\\:\.]/g, '-');
+                        firebaseData[safeKey] = data;
+                    }
+                    // เก็บด้วย document ID (safeId) ด้วย
+                    firebaseData[doc.id] = data;
+                });
 
                 requests = requests.map(req => {
                     const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
-                    const fbDoc = safeId ? firebaseData[safeId] : null;
+                    // หา fbDoc จากหลาย key: req.id ตรงๆ, safeId, หรือ doc.id
+                    const fbDoc = firebaseData[req.id] || firebaseData[safeId] || null;
 
                     if (fbDoc) {
                         return {
@@ -251,7 +264,6 @@ async function fetchUserRequests() {
                             completedCommandUrl: fbDoc.completedCommandUrl || req.completedCommandUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
-                            // field แยกสำหรับไฟล์ที่แอดมินอัพโหลดให้โดยเฉพาะ
                             adminMemoUrl: fbDoc.adminMemoUrl || req.adminMemoUrl,
                             adminCommandUrl: fbDoc.adminCommandUrl || req.adminCommandUrl,
                             adminDispatchUrl: fbDoc.adminDispatchUrl || req.adminDispatchUrl,
@@ -262,7 +274,7 @@ async function fetchUserRequests() {
                     return req;
                 });
             } catch (e) {
-                console.warn("Firebase Sync Error:", e);
+                console.warn('Firebase query error:', e.code || e.message);
             }
         }
 
