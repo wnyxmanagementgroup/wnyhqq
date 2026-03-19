@@ -376,22 +376,26 @@ function renderUserRequests(requests) {
 
         // ปุ่มดูไฟล์
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
-            // แสดงเฉพาะไฟล์ที่แอดมินอัพโหลดให้ (ใช้ adminMemoUrl/adminCommandUrl/adminDispatchUrl)
-            if (adminMemoUrl) {
+            // แสดงไฟล์สมบูรณ์: ถ้าแอดมินอัปโหลดใหม่ใช้ไฟล์นั้น ไม่งั้น fallback ไปไฟล์ระบบ
+            const finalMemoUrl = adminMemoUrl || completedMemoUrl;
+            const finalCommandUrl = adminCommandUrl || completedCommandUrl;
+            const finalDispatchUrl = adminDispatchUrl || dispatchBookUrl;
+
+            if (finalMemoUrl) {
                 actionButtons += `
-                <a href="${adminMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${finalMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
                     📄 บันทึกข้อความ (สมบูรณ์)
                 </a>`;
             }
-            if (adminCommandUrl) {
+            if (finalCommandUrl) {
                 actionButtons += `
-                <a href="${adminCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${finalCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
                     📋 คำสั่ง (สมบูรณ์)
                 </a>`;
             }
-            if (adminDispatchUrl) {
+            if (finalDispatchUrl) {
                 actionButtons += `
-                <a href="${adminDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
+                <a href="${finalDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
                     📦 หนังสือส่ง
                 </a>`;
             }
