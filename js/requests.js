@@ -402,6 +402,13 @@ function renderUserRequests(requests) {
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
                     <span>📤</span> ส่งบันทึก/แนบไฟล์
                 </button>`;
+            // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF ใหม่
+            if (!draftMemoUrl) {
+                actionButtons += `
+                <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
+                    🖨️ สร้าง PDF อัตโนมัติ
+                </button>`;
+            }
         }
         else if (completedMemoUrl && !completedCommandUrl) {
             actionButtons += `
@@ -1419,6 +1426,61 @@ function getRequestFormData() {
 }
 // เพิ่มฟังก์ชัน wait ไว้ด้านบนสุดของไฟล์หรือนอก handleRequestFormSubmit
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * สร้าง PDF ใหม่สำหรับงานที่มีเลขที่แล้วแต่ยังไม่มีไฟล์
+ * (กรณี Cloud Run timeout ตอน submit ครั้งแรก)
+ */
+async function regenerateMemo(requestId) {
+    const user = getCurrentUser();
+    if (!user) { showAlert('ผิดพลาด', 'กรุณาเข้าสู่ระบบใหม่'); return; }
+
+    // หาข้อมูลงานจาก cache
+    const req = (userRequestsCache || []).find(r => r.id === requestId);
+    if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลงาน กรุณารีเฟรชหน้า'); return; }
+
+    const btn = event?.currentTarget || document.querySelector(`button[onclick="regenerateMemo('${requestId}')"]`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังสร้าง PDF...'; }
+
+    try {
+        const pdfData = { ...req, id: requestId, requestId, doctype: 'memo' };
+        const { pdfBlob } = await generateOfficialPDF(pdfData);
+
+        // อัปโหลดไฟล์ไป Google Drive
+        const base64 = await blobToBase64(pdfBlob);
+        const safeId = requestId.replace(/[\/\\\:\.\s]/g, '-');
+        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+            data: base64,
+            filename: `memo_${safeId}.pdf`,
+            mimeType: 'application/pdf',
+            username: user.username,
+            requestId
+        });
+        if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
+
+        const fileUrl = uploadRes.url;
+
+        // บันทึก fileUrl ลง Firebase
+        if (typeof db !== 'undefined') {
+            await db.collection('requests').doc(safeId).set({
+                fileUrl, pdfUrl: fileUrl, memoPdfUrl: fileUrl,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+
+        showAlert('สำเร็จ', 'สร้าง PDF เรียบร้อยแล้ว');
+        window.open(fileUrl, '_blank');
+        await fetchUserRequests(); // รีเฟรช dashboard
+
+    } catch (error) {
+        console.error('regenerateMemo error:', error);
+        const isAbort = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
+        showAlert('ผิดพลาด', isAbort
+            ? 'เซิร์ฟเวอร์ PDF ใช้เวลานาน กรุณากดปุ่มอีกครั้ง (ครั้งที่ 2 จะเร็วขึ้น)'
+            : 'สร้าง PDF ไม่สำเร็จ: ' + error.message);
+        if (btn) { btn.disabled = false; btn.textContent = '🖨️ สร้าง PDF อัตโนมัติ'; }
+    }
+}
 // ✅ [ฉบับแก้ไขสมบูรณ์] ขอเลขที่จริงก่อน -> สร้าง PDF -> อัปเดตลิงก์กลับ
 // --- ค้นหาฟังก์ชัน handleRequestFormSubmit แล้วแทนที่ด้วยโค้ดนี้ ---
 
