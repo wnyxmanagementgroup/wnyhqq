@@ -242,7 +242,7 @@ async function fetchUserRequests() {
                     if (reqId) {
                         firebaseData[reqId] = data;
                         // เก็บด้วย safeId รูปแบบ (/→-) เผื่อ key ไม่ตรง
-                        const safeKey = reqId.replace(/[\/\\:\.]/g, '-');
+                        const safeKey = reqId.replace(/[\/\\:\.\s]/g, '-');
                         firebaseData[safeKey] = data;
                     }
                     // เก็บด้วย document ID (safeId) ด้วย
@@ -250,7 +250,7 @@ async function fetchUserRequests() {
                 });
 
                 requests = requests.map(req => {
-                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.\s]/g, '-') : '';
                     // หา fbDoc จากหลาย key: req.id ตรงๆ, safeId, หรือ doc.id
                     const fbDoc = firebaseData[req.id] || firebaseData[safeId] || null;
 
@@ -895,7 +895,7 @@ async function openEditPage(requestId) {
         if (typeof db !== 'undefined' && typeof USE_FIREBASE !== 'undefined' && USE_FIREBASE) {
             try {
                 // แปลง ID ให้เป็น Format ของ Document (เช่น บค/ -> บค-)
-                const docId = requestId.replace(/[\/\\\:\.]/g, '-');
+                const docId = requestId.replace(/[\/\\\:\.\s]/g, '-');
                 const docRef = db.collection('requests').doc(docId);
                 const docSnap = await docRef.get();
 
@@ -963,7 +963,7 @@ async function openEditPage(requestId) {
                 
                 // [แถม] อัปเดตข้อมูลที่ถูกต้องกลับลง Firebase ทันที เพื่อให้ครั้งหน้าเร็วขึ้น
                 if (requestData && typeof db !== 'undefined') {
-                    const docId = requestId.replace(/[\/\\\:\.]/g, '-');
+                    const docId = requestId.replace(/[\/\\\:\.\s]/g, '-');
                     // แปลงรายชื่อเป็น JSON String หรือ Array ตามที่ระบบคุณชอบ (แนะนำ Array สำหรับ Firebase)
                     let attendeesToSave = requestData.attendees || [];
                     if (typeof attendeesToSave === 'string') {
@@ -1391,7 +1391,6 @@ function getRequestFormData() {
         totalExpense: document.getElementById('form-total-expense')?.value || 0,
         
         vehicleOption: vehicleOption,
-        vehicleOption: document.querySelector('input[name="vehicle_option"]:checked')?.value || 'gov',
         licensePlate: document.getElementById('form-license-plate')?.value || '',
         publicVehicleDetails: document.getElementById('public-vehicle-details-input')?.value || '', 
         
@@ -1468,7 +1467,8 @@ async function handleRequestFormSubmit(e) {
                 requestId: realId
             });
 
-            if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + uploadRes.message);
+            if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
+            if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
             finalFileUrl = uploadRes.url;
 
         } catch (pdfError) {
@@ -1494,7 +1494,7 @@ async function handleRequestFormSubmit(e) {
 
         // 4.2 อัปเดต Firebase เสมอ (เพื่อให้ Dashboard หาเจอผ่าน query username)
         if (typeof db !== 'undefined') {
-            const docId = realId.replace(/[\/\\\:\.]/g, '-');
+            const docId = realId.replace(/[\/\\\:\.\s]/g, '-');
             const firestoreData = {
                 ...formData,
                 id: realId,
@@ -1964,7 +1964,8 @@ async function saveEditRequest() {
             username: formData.username
         });
 
-        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ");
+        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
+        if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
         const newFileUrl = uploadRes.url;
         console.log("✅ New File URL:", newFileUrl);
 
@@ -1980,14 +1981,18 @@ async function saveEditRequest() {
         if (result.status === 'success') {
             // อัปเดต Firestore
             if (typeof db !== 'undefined') {
-                const docId = formData.requestId.replace(/[\/\\\:\.]/g, '-');
-                await db.collection('requests').doc(docId).set({
-                    ...formData,
-                    fileUrl: newFileUrl,
-                    pdfUrl: newFileUrl,
-                    memoPdfUrl: newFileUrl,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                try {
+                    const docId = formData.requestId.replace(/[\/\\\:\.\s]/g, '-');
+                    await db.collection('requests').doc(docId).set({
+                        ...formData,
+                        fileUrl: newFileUrl,
+                        pdfUrl: newFileUrl,
+                        memoPdfUrl: newFileUrl,
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (fbErr) {
+                    console.warn("⚠️ Firestore update failed (non-critical):", fbErr.message);
+                }
             }
 
             // ★★★ ส่วนที่ปรับปรุงตามโจทย์ ★★★
@@ -2079,7 +2084,7 @@ async function mergeAndBackfillPDF(requestId, mainPdfUrl, attachments, user) {
             username: user.username
         });
 
-        if (uploadRes.status === 'success') {
+        if (uploadRes.status === 'success' && uploadRes.url) {
             const finalUrl = uploadRes.url;
             console.log("✅ Merge & Upload Success:", finalUrl);
 
@@ -2091,11 +2096,15 @@ async function mergeAndBackfillPDF(requestId, mainPdfUrl, attachments, user) {
             });
 
             if (typeof db !== 'undefined') {
-                await db.collection('requests').doc(requestId.replace(/[\/\\\:\.]/g, '-')).set({
-                    fileUrl: finalUrl,
-                    isMerged: true,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                try {
+                    await db.collection('requests').doc(requestId.replace(/[\/\\\:\.\s]/g, '-')).set({
+                        fileUrl: finalUrl,
+                        isMerged: true,
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (fbErr) {
+                    console.warn("⚠️ Firestore merge update failed (non-critical):", fbErr.message);
+                }
             }
 
             updateToast("รวมไฟล์เอกสารเสร็จสมบูรณ์", true);
@@ -2178,7 +2187,7 @@ async function fetchPendingMemos() {
             snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
             requests = requests.map(req => {
-                const safeId = req.id.replace(/[\/\\:\.]/g, '-');
+                const safeId = req.id.replace(/[\/\\:\.\s]/g, '-');
                 const fbDoc = firebaseData[safeId];
                 if (fbDoc) {
                     return { ...req, ...fbDoc }; // ใช้ข้อมูลล่าสุดจาก FB
