@@ -1038,9 +1038,16 @@ async function generateOfficialPDF(requestData) {
         formData.append("files", docxBlob, "document.docx");
         
         const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.BASE_URL : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
-        const cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData });
-        
-        if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status}`);
+        const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 30000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        let cloudRunResponse;
+        try {
+            cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData, signal: controller.signal });
+        } finally {
+            clearTimeout(timeoutId);
+        }
+        if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status} - กรุณาลองใหม่อีกครั้ง`);
         
         const pdfBlob = await cloudRunResponse.blob();
         return { pdfBlob, docxBlob };
@@ -1049,9 +1056,7 @@ async function generateOfficialPDF(requestData) {
         console.error("PDF Generation Error:", error);
         if (error.properties && error.properties.errors) {
             const errorMessages = error.properties.errors.map(e => e.properties.explanation).join("\n");
-            alert(`❌ เกิดข้อผิดพลาดใน Template:\n${errorMessages}`);
-        } else {
-            alert(`❌ สร้างเอกสารไม่สำเร็จ: ${error.message}`);
+            error.message = `เกิดข้อผิดพลาดใน Template:\n${errorMessages}`;
         }
         throw error;
     } finally {

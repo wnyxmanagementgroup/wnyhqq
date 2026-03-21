@@ -1439,67 +1439,87 @@ async function handleRequestFormSubmit(e) {
         
         console.log("✅ ได้รับเลขที่:", realId);
 
-        // --- Step 2: สร้าง PDF จาก Cloud Run ---
-        setBtnStatus('กำลังสร้างไฟล์ PDF...');
-        
-        const pdfData = { 
-            ...formData, 
-            id: realId, 
-            requestId: realId, 
-            doctype: 'memo' 
-        };
-        const { pdfBlob } = await generateOfficialPDF(pdfData);
+        // --- Steps 2-3: สร้าง PDF และอัปโหลด (อาจล้มเหลวได้ ระบบจะบันทึกคำขอไว้ก่อน) ---
+        let finalFileUrl = null;
+        let pdfFailed = false;
 
-        // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
-        setBtnStatus('กำลังบันทึกไฟล์...');
-        
-        const finalBase64 = await blobToBase64(pdfBlob);
-        const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-'); 
-        const safeFilename = `memo_${safeIdForFile}.pdf`;
+        try {
+            setBtnStatus('กำลังสร้างไฟล์ PDF...');
+            const pdfData = {
+                ...formData,
+                id: realId,
+                requestId: realId,
+                doctype: 'memo'
+            };
+            const { pdfBlob } = await generateOfficialPDF(pdfData);
 
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: finalBase64,
-            filename: safeFilename,
-            mimeType: 'application/pdf',
-            username: user.username,
-            requestId: realId
-        });
+            // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
+            setBtnStatus('กำลังบันทึกไฟล์...');
 
-        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + uploadRes.message);
-        const finalFileUrl = uploadRes.url;
+            const finalBase64 = await blobToBase64(pdfBlob);
+            const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-');
+            const safeFilename = `memo_${safeIdForFile}.pdf`;
+
+            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+                data: finalBase64,
+                filename: safeFilename,
+                mimeType: 'application/pdf',
+                username: user.username,
+                requestId: realId
+            });
+
+            if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + uploadRes.message);
+            finalFileUrl = uploadRes.url;
+
+        } catch (pdfError) {
+            console.warn("⚠️ PDF/Upload failed (graceful fallback):", pdfError.message);
+            pdfFailed = true;
+        }
 
         // --- Step 4: อัปเดตลิงก์กลับฐานข้อมูล ---
         setBtnStatus('กำลังปรับปรุงฐานข้อมูล...');
 
         const updatePayload = {
             requestId: realId,
-            fileUrl: finalFileUrl,      
-            pdfUrl: finalFileUrl,
-            memoPdfUrl: finalFileUrl, 
+            fileUrl: finalFileUrl || '',
+            pdfUrl: finalFileUrl || '',
+            memoPdfUrl: finalFileUrl || '',
             status: 'Pending'
         };
 
-        // 4.1 อัปเดต Google Sheet
-        await apiCall('POST', 'updateRequest', updatePayload);
-
-        // 4.2 อัปเดต Firebase (เพื่อให้ Dashboard เห็นทันที)
-        if (typeof db !== 'undefined') {
-            const docId = realId.replace(/[\/\\\:\.]/g, '-');
-            await db.collection('requests').doc(docId).set({
-                ...formData, 
-                ...updatePayload,
-                id: realId,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+        // 4.1 อัปเดต Google Sheet (เฉพาะกรณีมีไฟล์)
+        if (finalFileUrl) {
+            try { await apiCall('POST', 'updateRequest', updatePayload); } catch (e) { console.warn("updateRequest failed:", e.message); }
         }
 
-        // เปิดไฟล์ให้ดู
+        // 4.2 อัปเดต Firebase เสมอ (เพื่อให้ Dashboard หาเจอผ่าน query username)
+        if (typeof db !== 'undefined') {
+            const docId = realId.replace(/[\/\\\:\.]/g, '-');
+            const firestoreData = {
+                ...formData,
+                id: realId,
+                status: 'Pending',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            if (finalFileUrl) {
+                firestoreData.fileUrl = finalFileUrl;
+                firestoreData.pdfUrl = finalFileUrl;
+                firestoreData.memoPdfUrl = finalFileUrl;
+            }
+            await db.collection('requests').doc(docId).set(firestoreData, { merge: true });
+        }
+
+        // เปิดไฟล์ให้ดู (ถ้ามี)
         if (finalFileUrl) window.open(finalFileUrl, '_blank');
 
-        showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
-        
+        if (pdfFailed) {
+            showAlert("สร้างเอกสารสำเร็จ", `ได้รับเลขที่ ${realId} แล้ว แต่ไม่สามารถสร้างไฟล์ PDF อัตโนมัติได้\nกรุณากดปุ่ม "ส่งบันทึก/แนบไฟล์" ในหน้าแดชบอร์ดเพื่อแนบเอกสารด้วยตนเอง`);
+        } else {
+            showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
+        }
+
         resetRequestForm();
-        
+
         // ล้าง Cache และโหลดใหม่ทันที
         if (typeof clearRequestsCache === 'function') clearRequestsCache();
         await fetchUserRequests();
