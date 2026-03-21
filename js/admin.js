@@ -1038,17 +1038,28 @@ async function generateOfficialPDF(requestData) {
         formData.append("files", docxBlob, "document.docx");
         
         const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.BASE_URL : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
-        const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 30000;
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), timeout);
+        const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
+
+        // Retry loop (2 ครั้ง) รองรับ Cloud Run cold start และสัญญาณ 4G ไม่เสถียร
         let cloudRunResponse;
-        try {
-            cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData, signal: controller.signal });
-        } finally {
-            clearTimeout(timeoutId);
+        let lastCloudRunError;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+            try {
+                cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData, signal: controller.signal });
+                clearTimeout(timeoutId);
+                break; // สำเร็จ — ออกจาก loop
+            } catch (fetchErr) {
+                clearTimeout(timeoutId);
+                lastCloudRunError = fetchErr;
+                console.warn(`⚠️ Cloud Run attempt ${attempt + 1} failed:`, fetchErr.message);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // รอ 2 วิก่อน retry
+            }
         }
+        if (!cloudRunResponse) throw lastCloudRunError; // ล้มเหลวทั้ง 2 ครั้ง
         if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status} - กรุณาลองใหม่อีกครั้ง`);
-        
+
         const pdfBlob = await cloudRunResponse.blob();
         return { pdfBlob, docxBlob };
 

@@ -44,7 +44,7 @@ async function apiCall(method, action, payload = {}, retries = 2) {
             clearTimeout(timeoutId); // เคลียร์เวลาเมื่อ error
 
             const isLastAttempt = attempt === retries;
-            const isTimeout = error.name === 'AbortError';
+            const isTimeout = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
 
             console.warn(`⚠️ API Call Failed (Attempt ${attempt + 1}/${retries + 1}):`, error.message);
 
