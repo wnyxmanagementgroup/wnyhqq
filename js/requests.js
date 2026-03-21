@@ -1405,15 +1405,23 @@ const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function handleRequestFormSubmit(e) {
     e.preventDefault();
-    
+
     const submitBtn = document.getElementById('submit-request-button');
-    // Helper function เปลี่ยนข้อความปุ่ม
+    const submitBtnText = document.getElementById('submit-button-text');
+    const submitLoader = document.getElementById('submit-loader');
+
+    // Helper: อัปเดตสถานะปุ่มและแสดง loader
     const setBtnStatus = (msg) => {
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = `<span class="loader-sm"></span> ${msg}`;
-        }
+        if (submitBtn) submitBtn.disabled = true;
+        if (submitBtnText) submitBtnText.textContent = msg;
+        if (submitLoader) submitLoader.classList.remove('hidden');
     };
+
+    // แสดง overlay กันการกดซ้ำ / เปลี่ยนหน้า
+    const overlay = document.getElementById('processing-overlay');
+    const overlayMsg = document.getElementById('processing-overlay-message');
+    const setOverlayMsg = (msg) => { if (overlayMsg) overlayMsg.textContent = msg; };
+    if (overlay) overlay.classList.remove('hidden');
 
     try {
         const formData = getRequestFormData();
@@ -1427,6 +1435,7 @@ async function handleRequestFormSubmit(e) {
 
         // --- Step 1: ขอเลขที่เอกสาร ---
         setBtnStatus('กำลังขอเลขที่เอกสาร...');
+        setOverlayMsg('กำลังขอเลขที่เอกสาร...');
         
         // ส่ง SKIP_GENERATION เพื่อให้ GAS ทำงานเร็วขึ้น (ไม่ต้องสร้างไฟล์สำรอง)
         const createPayload = { ...formData, preGeneratedPdfUrl: 'SKIP_GENERATION' };
@@ -1444,6 +1453,7 @@ async function handleRequestFormSubmit(e) {
 
         try {
             setBtnStatus('กำลังสร้างไฟล์ PDF...');
+            setOverlayMsg('กำลังสร้างไฟล์ PDF...');
             const pdfData = {
                 ...formData,
                 id: realId,
@@ -1454,6 +1464,7 @@ async function handleRequestFormSubmit(e) {
 
             // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
             setBtnStatus('กำลังบันทึกไฟล์...');
+            setOverlayMsg('กำลังอัปโหลดไฟล์...');
 
             const finalBase64 = await blobToBase64(pdfBlob);
             const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-');
@@ -1478,6 +1489,7 @@ async function handleRequestFormSubmit(e) {
 
         // --- Step 4: อัปเดตลิงก์กลับฐานข้อมูล ---
         setBtnStatus('กำลังปรับปรุงฐานข้อมูล...');
+        setOverlayMsg('กำลังบันทึกข้อมูล...');
 
         const updatePayload = {
             requestId: realId,
@@ -1529,10 +1541,11 @@ async function handleRequestFormSubmit(e) {
         console.error("Submit Error:", error);
         showAlert("ข้อผิดพลาด", error.message);
     } finally {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = 'ส่งบันทึกขอไปราชการ';
-        }
+        // คืนสถานะปุ่มและซ่อน overlay
+        if (submitBtn) submitBtn.disabled = false;
+        if (submitBtnText) submitBtnText.textContent = 'บันทึกและสร้างเอกสาร';
+        if (submitLoader) submitLoader.classList.add('hidden');
+        if (overlay) overlay.classList.add('hidden');
     }
 }
 
