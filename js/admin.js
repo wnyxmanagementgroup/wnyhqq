@@ -1054,6 +1054,9 @@ async function generateOfficialPDF(requestData) {
 
     } catch (error) {
         console.error("PDF Generation Error:", error);
+        if (error.name === 'AbortError' || error.message === 'Fetch is aborted') {
+            throw new Error('ระบบสร้าง PDF ใช้เวลานานเกินกำหนด (อาจเกิดจากสัญญาณอินเทอร์เน็ตอ่อน หรือเซิร์ฟเวอร์ยังไม่พร้อม) กรุณากดพิมพ์เอกสารอีกครั้ง');
+        }
         if (error.properties && error.properties.errors) {
             const errorMessages = error.properties.errors.map(e => e.properties.explanation).join("\n");
             error.message = `เกิดข้อผิดพลาดใน Template:\n${errorMessages}`;
