@@ -273,16 +273,35 @@ async function fetchUserRequests() {
                     }
                     return req;
                 });
+
+                // เพิ่ม Firebase-only records ที่ GAS ยังไม่มี (เช่น เพิ่งสร้าง / GAS cache ล่าช้า)
+                const gasIdSet = new Set(requests.map(r => r.id).filter(Boolean));
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const reqId = data.id || data.requestId;
+                    // ถ้า id ยังไม่อยู่ใน GAS list → เพิ่มเข้าไปจาก Firebase โดยตรง
+                    if (reqId && !gasIdSet.has(reqId)) {
+                        requests.push({ ...data, _fromFirebaseOnly: true });
+                        gasIdSet.add(reqId); // กัน duplicate
+                    }
+                });
             } catch (e) {
                 console.warn('Firebase query error:', e.code || e.message);
             }
         }
 
         // 3. เรียงลำดับ (ใหม่ -> เก่า)
+        // Firebase-only records (เพิ่งสร้าง/GAS cache ล่าช้า) ใช้ timestamp แทน docDate
         if (requests.length > 0) {
             requests.sort((a, b) => {
-                const getTime = (d) => d ? new Date(d).getTime() : 0;
-                return getTime(b.docDate) - getTime(a.docDate);
+                const getTime = (r) => {
+                    if (r.docDate) return new Date(r.docDate).getTime();
+                    // Firestore Timestamp object
+                    if (r.timestamp?.toDate) return r.timestamp.toDate().getTime();
+                    if (r.lastUpdated?.toDate) return r.lastUpdated.toDate().getTime();
+                    return 0;
+                };
+                return getTime(b) - getTime(a);
             });
         }
 
