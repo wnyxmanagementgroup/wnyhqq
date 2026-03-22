@@ -226,47 +226,82 @@ async function fetchUserRequests() {
 
         let requests = (result.status === 'success') ? result.data || [] : [];
 
-        // 2. ดึงข้อมูลจาก Firebase มาทับ (เพื่อให้ได้ลิงก์ล่าสุดแบบ Real-time)
-        if (typeof db !== 'undefined') {
+        // 2. ดึงข้อมูลจาก Firebase มาทับ — ใช้ query .where('username') เพื่อให้ security rules ผ่าน
+        if (typeof db !== 'undefined' && user && user.username) {
             try {
                 const snapshot = await db.collection('requests')
                     .where('username', '==', user.username)
                     .get();
-                
+
+                // สร้าง lookup map โดยใช้ id field เป็น key (ตรงกับ req.id จาก GAS)
                 const firebaseData = {};
-                snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    // map ด้วยทั้ง id field และ doc.id (safeId) เพื่อ match ได้แน่นอน
+                    const reqId = data.id || data.requestId;
+                    if (reqId) {
+                        firebaseData[reqId] = data;
+                        // เก็บด้วย safeId รูปแบบ (/→-) เผื่อ key ไม่ตรง
+                        const safeKey = reqId.replace(/[\/\\:\.\s]/g, '-');
+                        firebaseData[safeKey] = data;
+                    }
+                    // เก็บด้วย document ID (safeId) ด้วย
+                    firebaseData[doc.id] = data;
+                });
 
                 requests = requests.map(req => {
-                    const safeId = req.id ? req.id.replace(/[\/\\:\.]/g, '-') : '';
-                    const fbDoc = safeId ? firebaseData[safeId] : null;
-                    
+                    const safeId = req.id ? req.id.replace(/[\/\\:\.\s]/g, '-') : '';
+                    // หา fbDoc จากหลาย key: req.id ตรงๆ, safeId, หรือ doc.id
+                    const fbDoc = firebaseData[req.id] || firebaseData[safeId] || null;
+
                     if (fbDoc) {
                         return {
                             ...req,
-                            // ใช้ลิงก์ล่าสุดจาก Firebase เสมอ
                             fileUrl: fbDoc.fileUrl || req.fileUrl,
                             pdfUrl: fbDoc.pdfUrl || req.pdfUrl,
-                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl, // เพิ่มตัวนี้ด้วย
-                            
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
                             completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
+                            completedCommandUrl: fbDoc.completedCommandUrl || req.completedCommandUrl,
                             commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
                             dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
+                            adminMemoUrl: fbDoc.adminMemoUrl || req.adminMemoUrl,
+                            adminCommandUrl: fbDoc.adminCommandUrl || req.adminCommandUrl,
+                            adminDispatchUrl: fbDoc.adminDispatchUrl || req.adminDispatchUrl,
                             status: fbDoc.status || req.status,
                             commandStatus: fbDoc.commandStatus || req.commandStatus
                         };
                     }
                     return req;
                 });
+
+                // เพิ่ม Firebase-only records ที่ GAS ยังไม่มี (เช่น เพิ่งสร้าง / GAS cache ล่าช้า)
+                const gasIdSet = new Set(requests.map(r => r.id).filter(Boolean));
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    const reqId = data.id || data.requestId;
+                    // ถ้า id ยังไม่อยู่ใน GAS list → เพิ่มเข้าไปจาก Firebase โดยตรง
+                    if (reqId && !gasIdSet.has(reqId)) {
+                        requests.push({ ...data, _fromFirebaseOnly: true });
+                        gasIdSet.add(reqId); // กัน duplicate
+                    }
+                });
             } catch (e) {
-                console.warn("Firebase Sync Error:", e);
+                console.warn('Firebase query error:', e.code || e.message);
             }
         }
 
         // 3. เรียงลำดับ (ใหม่ -> เก่า)
+        // Firebase-only records (เพิ่งสร้าง/GAS cache ล่าช้า) ใช้ timestamp แทน docDate
         if (requests.length > 0) {
             requests.sort((a, b) => {
-                const getTime = (d) => d ? new Date(d).getTime() : 0;
-                return getTime(b.docDate) - getTime(a.docDate);
+                const getTime = (r) => {
+                    if (r.docDate) return new Date(r.docDate).getTime();
+                    // Firestore Timestamp object
+                    if (r.timestamp?.toDate) return r.timestamp.toDate().getTime();
+                    if (r.lastUpdated?.toDate) return r.lastUpdated.toDate().getTime();
+                    return 0;
+                };
+                return getTime(b) - getTime(a);
             });
         }
 
@@ -322,17 +357,29 @@ function renderUserRequests(requests) {
         const safeId = escapeHtml(req.id || 'รอเลขที่');
         
         // ลิงก์ไฟล์ต่างๆ
-        const completedMemoUrl = req.completedMemoUrl; 
+        const completedMemoUrl = req.completedMemoUrl;
         const draftMemoUrl = req.fileUrl || req.pdfUrl || req.memoPdfUrl; // ลิงก์ไฟล์ที่สร้างจากการแก้ไขจะอยู่ที่นี่
         const completedCommandUrl = req.completedCommandUrl || req.commandPdfUrl || req.commandBookUrl;
         const dispatchBookUrl = req.dispatchBookUrl || req.dispatchBookPdfUrl;
+        // ไฟล์ที่แอดมินอัพโหลดให้โดยเฉพาะ (field แยก ไม่ปะปนกับไฟล์ผู้ใช้)
+        const adminMemoUrl = req.adminMemoUrl;
+        const adminCommandUrl = req.adminCommandUrl;
+        const adminDispatchUrl = req.adminDispatchUrl;
 
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-        const needsToSend = (draftMemoUrl && !completedMemoUrl && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก') || isFixing;
+        // ต้องส่ง: มี draftMemoUrl + ยังไม่ส่ง (completedMemoUrl)
+        // หรือ: ยังไม่มีไฟล์เลย + ยังไม่ส่ง (ให้ user แนบเองได้)
+        // หรือ: ตีกลับมาแก้ไข
+        const hasPendingId = req.id && req.id !== 'รอเลขที่';
+        const notSentYet = !completedMemoUrl && !isCompleted && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก';
+        const needsToSend = (notSentYet && hasPendingId) || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
-        if (completedCommandUrl) {
+        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            // สถานะนี้ต้องแสดงก่อนเสมอ แม้จะมี completedCommandUrl
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ เสร็จสิ้น/รับไฟล์ไปใช้งาน</span>`;
+        } else if (completedCommandUrl) {
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
         } else if (isCompleted) {
              statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">☑️ ส่งแล้ว (รอคำสั่ง)</span>`;
@@ -355,6 +402,13 @@ function renderUserRequests(requests) {
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
                     <span>📤</span> ส่งบันทึก/แนบไฟล์
                 </button>`;
+            // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF ใหม่
+            if (!draftMemoUrl) {
+                actionButtons += `
+                <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
+                    🖨️ สร้าง PDF อัตโนมัติ
+                </button>`;
+            }
         }
         else if (completedMemoUrl && !completedCommandUrl) {
             actionButtons += `
@@ -364,33 +418,54 @@ function renderUserRequests(requests) {
         }
 
         // ปุ่มดูไฟล์
-        if (completedMemoUrl) {
-            // กรณีส่งเสร็จแล้ว
-            actionButtons += `
+        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            // แสดงไฟล์สมบูรณ์: ถ้าแอดมินอัปโหลดใหม่ใช้ไฟล์นั้น ไม่งั้น fallback ไปไฟล์ระบบ
+            const finalMemoUrl = adminMemoUrl || completedMemoUrl;
+            const finalCommandUrl = adminCommandUrl || completedCommandUrl;
+            const finalDispatchUrl = adminDispatchUrl || dispatchBookUrl;
+
+            if (finalMemoUrl) {
+                actionButtons += `
+                <a href="${finalMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
+                    📄 บันทึกข้อความ (สมบูรณ์)
+                </a>`;
+            }
+            if (finalCommandUrl) {
+                actionButtons += `
+                <a href="${finalCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
+                    📋 คำสั่ง (สมบูรณ์)
+                </a>`;
+            }
+            if (finalDispatchUrl) {
+                actionButtons += `
+                <a href="${finalDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
+                    📦 หนังสือส่ง
+                </a>`;
+            }
+        } else {
+            if (completedMemoUrl) {
+                actionButtons += `
                 <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
                     📄 ดูบันทึก (ฉบับส่ง)
                 </a>`;
-        } else if (draftMemoUrl && !isCompleted) {
-            // ★★★ แก้ไขจุดนี้: เปลี่ยนจาก "พิมพ์ร่าง" เป็น "ดูบันทึก" เพื่อให้ตรงความต้องการ ★★★
-            actionButtons += `
+            } else if (draftMemoUrl && !isCompleted) {
+                actionButtons += `
                 <a href="${draftMemoUrl}" target="_blank" class="btn bg-teal-600 text-white hover:bg-teal-700 border border-teal-200 btn-sm flex items-center gap-1 shadow-sm">
                     📄 ดูบันทึก (ฉบับร่าง/แก้ไข)
                 </a>`;
-        }
-        // [C] ปุ่มคำสั่ง (ถ้ามี)
-        if (completedCommandUrl) {
-            actionButtons += `
+            }
+            if (completedCommandUrl) {
+                actionButtons += `
                 <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
                     📋 คำสั่ง
                 </a>`;
-        }
-
-        // [D] ปุ่มหนังสือส่ง (ถ้ามี)
-        if (dispatchBookUrl) {
-            actionButtons += `
+            }
+            if (dispatchBookUrl) {
+                actionButtons += `
                 <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
                     📦 หนังสือส่ง
                 </a>`;
+            }
         }
 
         // --- 3. เงื่อนไขการแก้ไข/ลบ ---
@@ -846,7 +921,7 @@ async function openEditPage(requestId) {
         if (typeof db !== 'undefined' && typeof USE_FIREBASE !== 'undefined' && USE_FIREBASE) {
             try {
                 // แปลง ID ให้เป็น Format ของ Document (เช่น บค/ -> บค-)
-                const docId = requestId.replace(/[\/\\\:\.]/g, '-');
+                const docId = requestId.replace(/[\/\\\:\.\s]/g, '-');
                 const docRef = db.collection('requests').doc(docId);
                 const docSnap = await docRef.get();
 
@@ -914,7 +989,7 @@ async function openEditPage(requestId) {
                 
                 // [แถม] อัปเดตข้อมูลที่ถูกต้องกลับลง Firebase ทันที เพื่อให้ครั้งหน้าเร็วขึ้น
                 if (requestData && typeof db !== 'undefined') {
-                    const docId = requestId.replace(/[\/\\\:\.]/g, '-');
+                    const docId = requestId.replace(/[\/\\\:\.\s]/g, '-');
                     // แปลงรายชื่อเป็น JSON String หรือ Array ตามที่ระบบคุณชอบ (แนะนำ Array สำหรับ Firebase)
                     let attendeesToSave = requestData.attendees || [];
                     if (typeof attendeesToSave === 'string') {
@@ -1342,7 +1417,6 @@ function getRequestFormData() {
         totalExpense: document.getElementById('form-total-expense')?.value || 0,
         
         vehicleOption: vehicleOption,
-        vehicleOption: document.querySelector('input[name="vehicle_option"]:checked')?.value || 'gov',
         licensePlate: document.getElementById('form-license-plate')?.value || '',
         publicVehicleDetails: document.getElementById('public-vehicle-details-input')?.value || '', 
         
@@ -1352,20 +1426,83 @@ function getRequestFormData() {
 }
 // เพิ่มฟังก์ชัน wait ไว้ด้านบนสุดของไฟล์หรือนอก handleRequestFormSubmit
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * สร้าง PDF ใหม่สำหรับงานที่มีเลขที่แล้วแต่ยังไม่มีไฟล์
+ * (กรณี Cloud Run timeout ตอน submit ครั้งแรก)
+ */
+async function regenerateMemo(requestId) {
+    const user = getCurrentUser();
+    if (!user) { showAlert('ผิดพลาด', 'กรุณาเข้าสู่ระบบใหม่'); return; }
+
+    // หาข้อมูลงานจาก cache
+    const req = (userRequestsCache || []).find(r => r.id === requestId);
+    if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลงาน กรุณารีเฟรชหน้า'); return; }
+
+    const btn = event?.currentTarget || document.querySelector(`button[onclick="regenerateMemo('${requestId}')"]`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังสร้าง PDF...'; }
+
+    try {
+        const pdfData = { ...req, id: requestId, requestId, doctype: 'memo' };
+        const { pdfBlob } = await generateOfficialPDF(pdfData);
+
+        // อัปโหลดไฟล์ไป Google Drive
+        const base64 = await blobToBase64(pdfBlob);
+        const safeId = requestId.replace(/[\/\\\:\.\s]/g, '-');
+        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+            data: base64,
+            filename: `memo_${safeId}.pdf`,
+            mimeType: 'application/pdf',
+            username: user.username,
+            requestId
+        });
+        if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
+
+        const fileUrl = uploadRes.url;
+
+        // บันทึก fileUrl ลง Firebase
+        if (typeof db !== 'undefined') {
+            await db.collection('requests').doc(safeId).set({
+                fileUrl, pdfUrl: fileUrl, memoPdfUrl: fileUrl,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+
+        showAlert('สำเร็จ', 'สร้าง PDF เรียบร้อยแล้ว');
+        window.open(fileUrl, '_blank');
+        await fetchUserRequests(); // รีเฟรช dashboard
+
+    } catch (error) {
+        console.error('regenerateMemo error:', error);
+        const isAbort = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
+        showAlert('ผิดพลาด', isAbort
+            ? 'เซิร์ฟเวอร์ PDF ใช้เวลานาน กรุณากดปุ่มอีกครั้ง (ครั้งที่ 2 จะเร็วขึ้น)'
+            : 'สร้าง PDF ไม่สำเร็จ: ' + error.message);
+        if (btn) { btn.disabled = false; btn.textContent = '🖨️ สร้าง PDF อัตโนมัติ'; }
+    }
+}
 // ✅ [ฉบับแก้ไขสมบูรณ์] ขอเลขที่จริงก่อน -> สร้าง PDF -> อัปเดตลิงก์กลับ
 // --- ค้นหาฟังก์ชัน handleRequestFormSubmit แล้วแทนที่ด้วยโค้ดนี้ ---
 
 async function handleRequestFormSubmit(e) {
     e.preventDefault();
-    
+
     const submitBtn = document.getElementById('submit-request-button');
-    // Helper function เปลี่ยนข้อความปุ่ม
+    const submitBtnText = document.getElementById('submit-button-text');
+    const submitLoader = document.getElementById('submit-loader');
+
+    // Helper: อัปเดตสถานะปุ่มและแสดง loader
     const setBtnStatus = (msg) => {
-        if (submitBtn) {
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = `<span class="loader-sm"></span> ${msg}`;
-        }
+        if (submitBtn) submitBtn.disabled = true;
+        if (submitBtnText) submitBtnText.textContent = msg;
+        if (submitLoader) submitLoader.classList.remove('hidden');
     };
+
+    // แสดง overlay กันการกดซ้ำ / เปลี่ยนหน้า
+    const overlay = document.getElementById('processing-overlay');
+    const overlayMsg = document.getElementById('processing-overlay-message');
+    const setOverlayMsg = (msg) => { if (overlayMsg) overlayMsg.textContent = msg; };
+    if (overlay) overlay.classList.remove('hidden');
 
     try {
         const formData = getRequestFormData();
@@ -1379,6 +1516,7 @@ async function handleRequestFormSubmit(e) {
 
         // --- Step 1: ขอเลขที่เอกสาร ---
         setBtnStatus('กำลังขอเลขที่เอกสาร...');
+        setOverlayMsg('กำลังขอเลขที่เอกสาร...');
         
         // ส่ง SKIP_GENERATION เพื่อให้ GAS ทำงานเร็วขึ้น (ไม่ต้องสร้างไฟล์สำรอง)
         const createPayload = { ...formData, preGeneratedPdfUrl: 'SKIP_GENERATION' };
@@ -1390,67 +1528,91 @@ async function handleRequestFormSubmit(e) {
         
         console.log("✅ ได้รับเลขที่:", realId);
 
-        // --- Step 2: สร้าง PDF จาก Cloud Run ---
-        setBtnStatus('กำลังสร้างไฟล์ PDF...');
-        
-        const pdfData = { 
-            ...formData, 
-            id: realId, 
-            requestId: realId, 
-            doctype: 'memo' 
-        };
-        const { pdfBlob } = await generateOfficialPDF(pdfData);
+        // --- Steps 2-3: สร้าง PDF และอัปโหลด (อาจล้มเหลวได้ ระบบจะบันทึกคำขอไว้ก่อน) ---
+        let finalFileUrl = null;
+        let pdfFailed = false;
 
-        // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
-        setBtnStatus('กำลังบันทึกไฟล์...');
-        
-        const finalBase64 = await blobToBase64(pdfBlob);
-        const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-'); 
-        const safeFilename = `memo_${safeIdForFile}.pdf`;
+        try {
+            setBtnStatus('กำลังสร้างไฟล์ PDF...');
+            setOverlayMsg('กำลังสร้างไฟล์ PDF...');
+            const pdfData = {
+                ...formData,
+                id: realId,
+                requestId: realId,
+                doctype: 'memo'
+            };
+            const { pdfBlob } = await generateOfficialPDF(pdfData);
 
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: finalBase64,
-            filename: safeFilename,
-            mimeType: 'application/pdf',
-            username: user.username,
-            requestId: realId
-        });
+            // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
+            setBtnStatus('กำลังบันทึกไฟล์...');
+            setOverlayMsg('กำลังอัปโหลดไฟล์...');
 
-        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + uploadRes.message);
-        const finalFileUrl = uploadRes.url;
+            const finalBase64 = await blobToBase64(pdfBlob);
+            const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-');
+            const safeFilename = `memo_${safeIdForFile}.pdf`;
+
+            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+                data: finalBase64,
+                filename: safeFilename,
+                mimeType: 'application/pdf',
+                username: user.username,
+                requestId: realId
+            });
+
+            if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
+            if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
+            finalFileUrl = uploadRes.url;
+
+        } catch (pdfError) {
+            console.warn("⚠️ PDF/Upload failed (graceful fallback):", pdfError.message);
+            pdfFailed = true;
+        }
 
         // --- Step 4: อัปเดตลิงก์กลับฐานข้อมูล ---
         setBtnStatus('กำลังปรับปรุงฐานข้อมูล...');
+        setOverlayMsg('กำลังบันทึกข้อมูล...');
 
         const updatePayload = {
             requestId: realId,
-            fileUrl: finalFileUrl,      
-            pdfUrl: finalFileUrl,
-            memoPdfUrl: finalFileUrl, 
+            fileUrl: finalFileUrl || '',
+            pdfUrl: finalFileUrl || '',
+            memoPdfUrl: finalFileUrl || '',
             status: 'Pending'
         };
 
-        // 4.1 อัปเดต Google Sheet
-        await apiCall('POST', 'updateRequest', updatePayload);
-
-        // 4.2 อัปเดต Firebase (เพื่อให้ Dashboard เห็นทันที)
-        if (typeof db !== 'undefined') {
-            const docId = realId.replace(/[\/\\\:\.]/g, '-');
-            await db.collection('requests').doc(docId).set({
-                ...formData, 
-                ...updatePayload,
-                id: realId,
-                timestamp: firebase.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
+        // 4.1 อัปเดต Google Sheet (เฉพาะกรณีมีไฟล์)
+        if (finalFileUrl) {
+            try { await apiCall('POST', 'updateRequest', updatePayload); } catch (e) { console.warn("updateRequest failed:", e.message); }
         }
 
-        // เปิดไฟล์ให้ดู
+        // 4.2 อัปเดต Firebase เสมอ (เพื่อให้ Dashboard หาเจอผ่าน query username)
+        if (typeof db !== 'undefined') {
+            const docId = realId.replace(/[\/\\\:\.\s]/g, '-');
+            const firestoreData = {
+                ...formData,
+                id: realId,
+                status: 'Pending',
+                timestamp: firebase.firestore.FieldValue.serverTimestamp()
+            };
+            if (finalFileUrl) {
+                firestoreData.fileUrl = finalFileUrl;
+                firestoreData.pdfUrl = finalFileUrl;
+                firestoreData.memoPdfUrl = finalFileUrl;
+            }
+            await db.collection('requests').doc(docId).set(firestoreData, { merge: true });
+        }
+
+        // เปิดไฟล์ให้ดู (ถ้ามี)
         if (finalFileUrl) window.open(finalFileUrl, '_blank');
 
-        showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
-        
+        if (pdfFailed) {
+            showAlert("สร้างเอกสารสำเร็จ", `ได้รับเลขที่ ${realId} แล้ว แต่ไม่สามารถสร้างไฟล์ PDF อัตโนมัติได้\nกรุณากดปุ่ม "ส่งบันทึก/แนบไฟล์" ในหน้าแดชบอร์ดเพื่อแนบเอกสารด้วยตนเอง`);
+        } else {
+            showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
+        }
+
         resetRequestForm();
-        
+
         // ล้าง Cache และโหลดใหม่ทันที
         if (typeof clearRequestsCache === 'function') clearRequestsCache();
         await fetchUserRequests();
@@ -1460,10 +1622,11 @@ async function handleRequestFormSubmit(e) {
         console.error("Submit Error:", error);
         showAlert("ข้อผิดพลาด", error.message);
     } finally {
-        if (submitBtn) {
-            submitBtn.disabled = false;
-            submitBtn.innerHTML = 'ส่งบันทึกขอไปราชการ';
-        }
+        // คืนสถานะปุ่มและซ่อน overlay
+        if (submitBtn) submitBtn.disabled = false;
+        if (submitBtnText) submitBtnText.textContent = 'บันทึกและสร้างเอกสาร';
+        if (submitLoader) submitLoader.classList.add('hidden');
+        if (overlay) overlay.classList.add('hidden');
     }
 }
 
@@ -1895,7 +2058,8 @@ async function saveEditRequest() {
             username: formData.username
         });
 
-        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ");
+        if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
+        if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
         const newFileUrl = uploadRes.url;
         console.log("✅ New File URL:", newFileUrl);
 
@@ -1911,14 +2075,18 @@ async function saveEditRequest() {
         if (result.status === 'success') {
             // อัปเดต Firestore
             if (typeof db !== 'undefined') {
-                const docId = formData.requestId.replace(/[\/\\\:\.]/g, '-');
-                await db.collection('requests').doc(docId).set({
-                    ...formData,
-                    fileUrl: newFileUrl,
-                    pdfUrl: newFileUrl,
-                    memoPdfUrl: newFileUrl,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                try {
+                    const docId = formData.requestId.replace(/[\/\\\:\.\s]/g, '-');
+                    await db.collection('requests').doc(docId).set({
+                        ...formData,
+                        fileUrl: newFileUrl,
+                        pdfUrl: newFileUrl,
+                        memoPdfUrl: newFileUrl,
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (fbErr) {
+                    console.warn("⚠️ Firestore update failed (non-critical):", fbErr.message);
+                }
             }
 
             // ★★★ ส่วนที่ปรับปรุงตามโจทย์ ★★★
@@ -2010,7 +2178,7 @@ async function mergeAndBackfillPDF(requestId, mainPdfUrl, attachments, user) {
             username: user.username
         });
 
-        if (uploadRes.status === 'success') {
+        if (uploadRes.status === 'success' && uploadRes.url) {
             const finalUrl = uploadRes.url;
             console.log("✅ Merge & Upload Success:", finalUrl);
 
@@ -2022,11 +2190,15 @@ async function mergeAndBackfillPDF(requestId, mainPdfUrl, attachments, user) {
             });
 
             if (typeof db !== 'undefined') {
-                await db.collection('requests').doc(requestId.replace(/[\/\\\:\.]/g, '-')).set({
-                    fileUrl: finalUrl,
-                    isMerged: true,
-                    lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                }, { merge: true });
+                try {
+                    await db.collection('requests').doc(requestId.replace(/[\/\\\:\.\s]/g, '-')).set({
+                        fileUrl: finalUrl,
+                        isMerged: true,
+                        lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                    }, { merge: true });
+                } catch (fbErr) {
+                    console.warn("⚠️ Firestore merge update failed (non-critical):", fbErr.message);
+                }
             }
 
             updateToast("รวมไฟล์เอกสารเสร็จสมบูรณ์", true);
@@ -2109,7 +2281,7 @@ async function fetchPendingMemos() {
             snapshot.forEach(doc => { firebaseData[doc.id] = doc.data(); });
 
             requests = requests.map(req => {
-                const safeId = req.id.replace(/[\/\\:\.]/g, '-');
+                const safeId = req.id.replace(/[\/\\:\.\s]/g, '-');
                 const fbDoc = firebaseData[safeId];
                 if (fbDoc) {
                     return { ...req, ...fbDoc }; // ใช้ข้อมูลล่าสุดจาก FB

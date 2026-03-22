@@ -861,8 +861,18 @@ async function handleMemoSubmitFromModal(e) {
     
     toggleLoader('send-memo-submit-button', true);
 
+    // ล็อกปุ่มยกเลิก/ปิด modal กันการกดซ้ำหรือปิดกลางคัน
+    const cancelBtn = document.getElementById('send-memo-cancel-button');
+    const closeBtn = document.getElementById('send-memo-modal-close-button');
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (closeBtn) closeBtn.disabled = true;
+
+    // Helper: อัปเดตข้อความสถานะบนปุ่ม submit (ไม่ทับโครงสร้าง loader/span)
+    const submitBtnSpan = document.querySelector('#send-memo-submit-button span');
+    const setMemoStatus = (msg) => { if (submitBtnSpan) submitBtnSpan.textContent = msg; };
+
     try {
-        let finalFileUrlForAdmin = ""; 
+        let finalFileUrlForAdmin = "";
 
         if (memoType === 'non_reimburse') {
             // --- ดึงไฟล์จาก Input ---
@@ -887,33 +897,23 @@ async function handleMemoSubmitFromModal(e) {
 
             // --- 2. รวมไฟล์และอัปโหลด (ถ้ามีไฟล์) ---
             if (filesToMerge.length > 0) {
-                // เปลี่ยนข้อความปุ่ม
-                const btn = document.getElementById('send-memo-submit-button');
-                const originalBtnText = btn.innerHTML;
-                btn.innerHTML = '<div class="loader"></div> กำลังรวมไฟล์ PDF...';
-
-                // เรียกฟังก์ชันรวมไฟล์
+                setMemoStatus('กำลังรวมไฟล์ PDF...');
                 const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
 
-                // --- อัปโหลดไฟล์ ---
-                btn.innerHTML = '<div class="loader"></div> กำลังอัปโหลด...';
-                
+                setMemoStatus('กำลังอัปโหลด...');
                 const mergedBase64 = await blobToBase64(mergedPdfBlob);
-                
+
                 const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
                     data: mergedBase64,
-                    filename: `Complete_Memo_${requestId.replace(/[\/\\:\.]/g, '-')}.pdf`,
+                    filename: `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`,
                     mimeType: 'application/pdf',
                     username: user.username,
                     requestId: requestId
                 });
 
-                if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + uploadRes.message);
-                
+                if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
+                if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
                 finalFileUrlForAdmin = uploadRes.url;
-                
-                // คืนค่าปุ่ม
-                btn.innerHTML = originalBtnText;
 
             } else if (isAdmin) {
                 console.log("🛡️ Admin Bypass: ส่งบันทึกโดยไม่มีไฟล์แนบ");
@@ -968,10 +968,12 @@ async function handleMemoSubmitFromModal(e) {
     } catch (error) {
         console.error(error);
         showAlert('ผิดพลาด', error.message);
-        const btn = document.getElementById('send-memo-submit-button');
-        if(btn) btn.innerHTML = 'ยืนยันการส่งบันทึก';
     } finally {
+        // คืนสถานะปุ่มทั้งหมด
         toggleLoader('send-memo-submit-button', false);
+        setMemoStatus('ยืนยันการส่งบันทึก');
+        if (cancelBtn) cancelBtn.disabled = false;
+        if (closeBtn) closeBtn.disabled = false;
     }
 }
 // ในไฟล์ js/main.js

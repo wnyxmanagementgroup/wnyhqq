@@ -3,7 +3,7 @@
 
 async function apiCall(method, action, payload = {}, retries = 2) {
     let url = SCRIPT_URL;
-    const TIMEOUT_MS = 30000; // 30 วินาที (ถ้าเกินนี้ให้ตัด)
+    const TIMEOUT_MS = 60000; // 60 วินาที (GAS อาจใช้เวลานานในช่วง cold start)
 
     // ตั้งค่า Headers
     const options = {
@@ -14,7 +14,7 @@ async function apiCall(method, action, payload = {}, retries = 2) {
 
     // จัดการ Parameter
     if (method === 'GET') {
-        const params = new URLSearchParams({ action, ...payload, cacheBust: new Date().getTime() }); 
+        const params = new URLSearchParams({ action, ...payload, cacheBust: new Date().getTime() });
         url += `?${params}`;
     } else {
         options.body = JSON.stringify({ action, payload });
@@ -27,39 +27,38 @@ async function apiCall(method, action, payload = {}, retries = 2) {
     for (let attempt = 0; attempt <= retries; attempt++) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-        
+
         try {
             // เพิ่ม signal เพื่อรองรับ Timeout
             const response = await fetch(url, { ...options, signal: controller.signal });
             clearTimeout(timeoutId); // ยกเลิกตัวจับเวลาถ้าโหลดเสร็จทัน
 
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            
+
             const result = await response.json();
             if (result.status === 'error') throw new Error(result.message);
-            
+
             return result; // ถ้าสำเร็จ ส่งค่ากลับทันที
 
         } catch (error) {
             clearTimeout(timeoutId); // เคลียร์เวลาเมื่อ error
 
             const isLastAttempt = attempt === retries;
-            const isTimeout = error.name === 'AbortError';
-            
+            const isTimeout = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
+
             console.warn(`⚠️ API Call Failed (Attempt ${attempt + 1}/${retries + 1}):`, error.message);
 
             if (isLastAttempt) {
-                // ถ้าครบโควตาลองใหม่แล้วยังไม่ได้ ให้แจ้ง Error จริงๆ
                 console.error('❌ API Call Given Up:', error);
-                
+
+                // แปลง error เป็นข้อความไทยที่เข้าใจได้ แล้วให้ caller จัดการแสดงผล
                 if (isTimeout) {
-                    showAlert('หมดเวลาการเชื่อมต่อ', 'ระบบใช้เวลานานเกินไป กรุณาลองใหม่อีกครั้ง');
+                    throw new Error('ระบบใช้เวลานานเกินไป (timeout) กรุณาลองใหม่อีกครั้ง');
                 } else if (error.message.includes('Failed to fetch')) {
-                    showAlert('การเชื่อมต่อล้มเหลว', 'ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ กรุณาเช็คอินเทอร์เน็ต');
+                    throw new Error('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้ กรุณาเช็คการเชื่อมต่ออินเทอร์เน็ต');
                 } else {
-                    showAlert('เกิดข้อผิดพลาด', `Server error: ${error.message}`);
+                    throw error; // ส่ง error เดิมไปให้ caller (message ชัดเจนอยู่แล้ว)
                 }
-                throw error;
             }
 
             // ถ้ายังไม่ครบโควตา ให้รอแป๊บหนึ่งแล้วลองใหม่ (1 วินาที)

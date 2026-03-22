@@ -1038,20 +1038,39 @@ async function generateOfficialPDF(requestData) {
         formData.append("files", docxBlob, "document.docx");
         
         const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.BASE_URL : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
-        const cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData });
-        
-        if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status}`);
-        
+        const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
+
+        // Retry loop (2 ครั้ง) รองรับ Cloud Run cold start และสัญญาณ 4G ไม่เสถียร
+        let cloudRunResponse;
+        let lastCloudRunError;
+        for (let attempt = 0; attempt < 2; attempt++) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), timeout);
+            try {
+                cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData, signal: controller.signal });
+                clearTimeout(timeoutId);
+                break; // สำเร็จ — ออกจาก loop
+            } catch (fetchErr) {
+                clearTimeout(timeoutId);
+                lastCloudRunError = fetchErr;
+                console.warn(`⚠️ Cloud Run attempt ${attempt + 1} failed:`, fetchErr.message);
+                if (attempt === 0) await new Promise(r => setTimeout(r, 2000)); // รอ 2 วิก่อน retry
+            }
+        }
+        if (!cloudRunResponse) throw lastCloudRunError; // ล้มเหลวทั้ง 2 ครั้ง
+        if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status} - กรุณาลองใหม่อีกครั้ง`);
+
         const pdfBlob = await cloudRunResponse.blob();
         return { pdfBlob, docxBlob };
 
     } catch (error) {
         console.error("PDF Generation Error:", error);
+        if (error.name === 'AbortError' || error.message === 'Fetch is aborted') {
+            throw new Error('ระบบสร้าง PDF ใช้เวลานานเกินกำหนด (อาจเกิดจากสัญญาณอินเทอร์เน็ตอ่อน หรือเซิร์ฟเวอร์ยังไม่พร้อม) กรุณากดพิมพ์เอกสารอีกครั้ง');
+        }
         if (error.properties && error.properties.errors) {
             const errorMessages = error.properties.errors.map(e => e.properties.explanation).join("\n");
-            alert(`❌ เกิดข้อผิดพลาดใน Template:\n${errorMessages}`);
-        } else {
-            alert(`❌ สร้างเอกสารไม่สำเร็จ: ${error.message}`);
+            error.message = `เกิดข้อผิดพลาดใน Template:\n${errorMessages}`;
         }
         throw error;
     } finally {
@@ -1351,26 +1370,37 @@ async function handleAdminMemoActionSubmit(e) {
         });
         
         if (result.status === 'success') {
-            const urls = result.data || {}; 
+            const urls = result.data || {};
             const safeId = memoId.replace(/[\/\\:\.]/g, '-');
 
             if (typeof db !== 'undefined') {
                  const updateData = { status: status };
-                 if (urls.completedMemoUrl) updateData.completedMemoUrl = urls.completedMemoUrl;
-                 if (urls.completedCommandUrl) updateData.completedCommandUrl = urls.completedCommandUrl;
-                 if (urls.dispatchBookUrl) updateData.dispatchBookUrl = urls.dispatchBookUrl;
+                 // บันทึกไฟล์ที่แอดมินอัพโหลดลง field แยกต่างหาก ไม่ปะปนกับไฟล์ของผู้ใช้
+                 if (urls.completedMemoUrl) updateData.adminMemoUrl = urls.completedMemoUrl;
+                 if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
+                 if (urls.dispatchBookUrl) updateData.adminDispatchUrl = urls.dispatchBookUrl;
+
+                 // หา refNumber จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
+                 // (memo.id อาจ ≠ req.id ที่ผู้ใช้ใช้ fetch)
+                 const memoEntry = allMemosCache.find(m => m.id === memoId);
+                 const refNumber = memoEntry?.refNumber;
+                 const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
 
                  try {
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });
                     await db.collection('requests').doc(safeId).set(updateData, { merge: true });
+                    // save ด้วย refNumber key ด้วย เผื่อ req.id = refNumber
+                    if (safeRefId && safeRefId !== safeId) {
+                        await db.collection('requests').doc(safeRefId).set(updateData, { merge: true });
+                    }
                  } catch (e) { console.warn("Firestore update error:", e); }
             }
 
-            if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') { 
-                const memo = allMemosCache.find(m => m.id === memoId); 
-                if (memo && memo.submittedBy) { 
-                    await sendCompletionEmail(memo.refNumber, memo.submittedBy, status); 
-                } 
+            if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+                const memo = allMemosCache.find(m => m.id === memoId);
+                if (memo && memo.submittedBy) {
+                    await sendCompletionEmail(memo.refNumber, memo.submittedBy, status);
+                }
             }
             showAlert('สำเร็จ', 'อัปเดตสถานะและไฟล์เรียบร้อยแล้ว'); 
             document.getElementById('admin-memo-action-modal').style.display = 'none'; 
