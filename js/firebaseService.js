@@ -198,14 +198,36 @@ async function generatePdfFromCloudRun(templateName, data) {
     const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
         ? PDF_ENGINE_CONFIG.BASE_URL
         : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
+    const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
 
-    const response = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, {
-        method: "POST",
-        body: formPayload
-    });
-
-    if (!response.ok) throw new Error(`Cloud Run Error: ${response.status}`);
-    return await response.blob();
+    // Retry loop (2 ครั้ง) — รองรับ Cloud Run cold start และสัญญาณมือถือไม่เสถียร
+    let cloudRunResponse, lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), timeout);
+        try {
+            cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, {
+                method: "POST",
+                body: formPayload,
+                signal: controller.signal
+            });
+            clearTimeout(tid);
+            break;
+        } catch (err) {
+            clearTimeout(tid);
+            lastErr = err;
+            console.warn(`⚠️ generatePdfFromCloudRun attempt ${attempt + 1} failed:`, err.message);
+            if (attempt === 0) await new Promise(r => setTimeout(r, 2000));
+        }
+    }
+    if (!cloudRunResponse) {
+        const isAbort = lastErr?.name === 'AbortError' || lastErr?.message === 'Fetch is aborted';
+        throw new Error(isAbort
+            ? 'ระบบสร้าง PDF ใช้เวลานานเกินกำหนด กรุณาลองใหม่อีกครั้ง'
+            : (lastErr?.message || 'Cloud Run ไม่ตอบสนอง'));
+    }
+    if (!cloudRunResponse.ok) throw new Error(`Cloud Run Error: ${cloudRunResponse.status}`);
+    return await cloudRunResponse.blob();
 }
 
 // Helper Function: แปลง Blob เป็น Base64 (เผื่อในไฟล์นี้ยังไม่มี)

@@ -27,7 +27,7 @@ const PDF_ENGINE_CONFIG = {
         COMMAND_SOLO: 'template_command_solo.docx',
         COMMAND_SMALL: 'template_command_small.docx',
         COMMAND_LARGE: 'template_command_large.docx',
-        DISPATCH: 'template_dispatch.docx'
+        DISPATCH: 'แม่แบบหนังสือส่งใหม่.docx'
     }
 };
 // 3. Initialize Firebase & Hybrid Mode
