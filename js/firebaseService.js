@@ -191,24 +191,23 @@ async function generatePdfFromCloudRun(templateName, data) {
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     });
 
-    // ส่งไปที่ Cloud Run เพื่อแปลงเป็น PDF
-    const formPayload = new FormData();
-    formPayload.append("files", docxBlob, "document.docx");
-
     const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
         ? PDF_ENGINE_CONFIG.BASE_URL
         : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
     const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
 
     // Retry loop (2 ครั้ง) — รองรับ Cloud Run cold start และสัญญาณมือถือไม่เสถียร
+    // สำคัญ: สร้าง FormData ใหม่ในแต่ละ attempt เพราะ iOS Safari จะ consume body หลัง abort
     let cloudRunResponse, lastErr;
     for (let attempt = 0; attempt < 2; attempt++) {
         const controller = new AbortController();
         const tid = setTimeout(() => controller.abort(), timeout);
+        const attemptPayload = new FormData();
+        attemptPayload.append("files", docxBlob, "document.docx");
         try {
             cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, {
                 method: "POST",
-                body: formPayload,
+                body: attemptPayload,
                 signal: controller.signal
             });
             clearTimeout(tid);

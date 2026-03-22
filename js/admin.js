@@ -1034,20 +1034,21 @@ async function generateOfficialPDF(requestData) {
         doc.render(renderData);
 
         const docxBlob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-        const formData = new FormData();
-        formData.append("files", docxBlob, "document.docx");
-        
+
         const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.BASE_URL : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
         const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
 
         // Retry loop (2 ครั้ง) รองรับ Cloud Run cold start และสัญญาณ 4G ไม่เสถียร
+        // สำคัญ: สร้าง FormData ใหม่ในแต่ละ attempt เพราะ iOS Safari จะ consume body หลัง abort
         let cloudRunResponse;
         let lastCloudRunError;
         for (let attempt = 0; attempt < 2; attempt++) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeout);
+            const attemptFormData = new FormData();
+            attemptFormData.append("files", docxBlob, "document.docx");
             try {
-                cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: formData, signal: controller.signal });
+                cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, { method: "POST", body: attemptFormData, signal: controller.signal });
                 clearTimeout(timeoutId);
                 break; // สำเร็จ — ออกจาก loop
             } catch (fetchErr) {
