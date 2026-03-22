@@ -392,8 +392,22 @@ function renderAdminRequestsList(requests) {
                 </button>`;
         }
 
-        // --- [NEW] ปุ่มส่งบันทึกแทน (สำหรับ Admin) ---
-        // แสดงเมื่อยังไม่มีไฟล์บันทึกสมบูรณ์
+        // --- ปุ่มดูบันทึก (ฉบับระบบ) / สร้าง PDF แทนผู้ใช้ ---
+        const userDraftUrl = request.pdfUrl || request.memoPdfUrl || request.fileUrl;
+        let userDraftPdfSection = '';
+        if (userDraftUrl) {
+            userDraftPdfSection = `
+                <a href="${userDraftUrl}" target="_blank" class="btn bg-indigo-500 hover:bg-indigo-600 text-white btn-sm flex items-center gap-1 shadow-sm px-2" title="ดูบันทึกที่ผู้ใช้สร้างจากระบบ">
+                    📄 ดูบันทึก (ระบบ)
+                </a>`;
+        } else {
+            userDraftPdfSection = `
+                <button onclick="adminRegenerateMemoForUser('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1 shadow-sm px-2" title="สร้าง PDF บันทึกข้อความแทนผู้ใช้">
+                    🖨️ สร้าง PDF แทน
+                </button>`;
+        }
+
+        // --- ปุ่มส่งบันทึกแทน / ดูบันทึกฉบับส่ง (สำหรับ Admin) ---
         let adminMemoBtn = '';
         if (!request.completedMemoUrl) {
             adminMemoBtn = `
@@ -401,10 +415,9 @@ function renderAdminRequestsList(requests) {
                     📤 ส่งบันทึกแทน
                 </button>`;
         } else {
-            // ถ้ามีแล้ว ให้แสดงปุ่มดูไฟล์แทน
-             adminMemoBtn = `
+            adminMemoBtn = `
                 <a href="${request.completedMemoUrl}" target="_blank" class="btn bg-blue-500 hover:bg-blue-600 text-white btn-sm flex items-center gap-1 shadow-sm px-3">
-                    📄 ดูบันทึก
+                    📄 ดูบันทึก (ส่งแล้ว)
                 </a>`;
         }
 
@@ -455,15 +468,80 @@ function renderAdminRequestsList(requests) {
                 </div>
                 
                 <div class="flex flex-col gap-2 w-full md:w-auto items-end">
-                    <div class="flex gap-2">
-                         ${request.pdfUrl ? `<a href="${request.pdfUrl}" target="_blank" class="text-xs text-indigo-500 hover:text-indigo-700 underline flex items-center gap-1">📎 ดูบันทึกข้อความต้นเรื่อง</a>` : ''}
-                         <button onclick="deleteRequestByAdmin('${safeId}')" class="text-xs text-red-500 hover:text-red-700 underline flex items-center gap-1">🗑️ ลบรายการ</button>
+                    <div class="flex flex-wrap gap-2 justify-end items-center">
+                        ${userDraftPdfSection}
+                        <button onclick="deleteRequestByAdmin('${safeId}')" class="text-xs text-red-500 hover:text-red-700 underline flex items-center gap-1">🗑️ ลบรายการ</button>
                     </div>
                     ${commandActionButtons}
                 </div>
             </div>
         </div>`;
     }).join('');
+}
+
+// --- ฟังก์ชัน Admin สร้าง PDF บันทึกข้อความแทนผู้ใช้ ---
+async function adminRegenerateMemoForUser(requestId) {
+    if (!checkAdminAccess()) return;
+
+    const req = (allRequestsCache || []).find(r => r.id === requestId || r.requestId === requestId);
+    if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลงาน กรุณารีเฟรชหน้า'); return; }
+
+    const btn = event?.currentTarget || document.querySelector(`button[onclick="adminRegenerateMemoForUser('${requestId}')"]`);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังสร้าง...'; }
+
+    let uploadSucceeded = false;
+    let generatedPdfBlob = null;
+    let uploadedFileUrl = null;
+
+    try {
+        const pdfData = { ...req, id: requestId, requestId, doctype: 'memo' };
+        const { pdfBlob } = await generateOfficialPDF(pdfData);
+        generatedPdfBlob = pdfBlob;
+
+        const base64 = await blobToBase64(pdfBlob);
+        const safeId = requestId.replace(/[\/\\\:\.\s]/g, '-');
+        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
+            data: base64,
+            filename: `memo_${safeId}.pdf`,
+            mimeType: 'application/pdf',
+            username: req.username || 'admin',
+            requestId
+        });
+        if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
+
+        uploadedFileUrl = uploadRes.url;
+        uploadSucceeded = true;
+
+        if (typeof db !== 'undefined') {
+            await db.collection('requests').doc(safeId).set({
+                fileUrl: uploadedFileUrl, pdfUrl: uploadedFileUrl, memoPdfUrl: uploadedFileUrl,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        }
+
+        showAlert('สำเร็จ', `สร้าง PDF สำหรับ "${req.requesterName || requestId}" เรียบร้อยแล้ว`);
+        window.open(uploadedFileUrl, '_blank');
+        try { await fetchAllRequestsForCommand(); } catch (e) { console.warn('refresh failed:', e); }
+
+    } catch (error) {
+        if (uploadSucceeded) return;
+
+        const isDrivePermission = error.message && error.message.includes('DriveApp');
+        const isAbort = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
+
+        if (generatedPdfBlob) {
+            window.open(URL.createObjectURL(generatedPdfBlob), '_blank');
+            showAlert('PDF สร้างสำเร็จ (บันทึกไม่ได้)',
+                isDrivePermission
+                    ? 'ไฟล์ PDF ถูกเปิดในหน้าต่างใหม่แล้ว\n⚠️ GAS ไม่มีสิทธิ์ DriveApp — ผู้ดูแลต้องแก้ไขใน Google Apps Script'
+                    : 'ไฟล์ PDF ถูกเปิดในหน้าต่างใหม่แล้ว\nสาเหตุ: ' + error.message);
+        } else {
+            showAlert('ผิดพลาด', isAbort
+                ? 'เซิร์ฟเวอร์ PDF ใช้เวลานาน กรุณากดปุ่มอีกครั้ง'
+                : 'สร้าง PDF ไม่สำเร็จ: ' + error.message);
+        }
+        if (btn) { btn.disabled = false; btn.textContent = '🖨️ สร้าง PDF แทน'; }
+    }
 }
 
 // --- 2. ฟังก์ชัน Helper: เลือกสีของ Dropdown ---

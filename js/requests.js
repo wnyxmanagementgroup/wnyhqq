@@ -402,12 +402,17 @@ function renderUserRequests(requests) {
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
                     <span>📤</span> ส่งบันทึก/แนบไฟล์
                 </button>`;
-            // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF ใหม่
+            // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF / ถ้ามีแล้ว — แสดงปุ่มดู
             if (!draftMemoUrl) {
                 actionButtons += `
                 <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
                     🖨️ สร้าง PDF อัตโนมัติ
                 </button>`;
+            } else {
+                actionButtons += `
+                <a href="${draftMemoUrl}" target="_blank" class="btn bg-indigo-500 hover:bg-indigo-600 text-white btn-sm flex items-center gap-1">
+                    📄 ดูบันทึก (ฉบับระบบ)
+                </a>`;
             }
         }
         else if (completedMemoUrl && !completedCommandUrl) {
