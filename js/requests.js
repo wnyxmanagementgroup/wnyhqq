@@ -1442,9 +1442,11 @@ async function regenerateMemo(requestId) {
     const btn = event?.currentTarget || document.querySelector(`button[onclick="regenerateMemo('${requestId}')"]`);
     if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังสร้าง PDF...'; }
 
+    let generatedPdfBlob = null;
     try {
         const pdfData = { ...req, id: requestId, requestId, doctype: 'memo' };
         const { pdfBlob } = await generateOfficialPDF(pdfData);
+        generatedPdfBlob = pdfBlob;
 
         // อัปโหลดไฟล์ไป Google Drive
         const base64 = await blobToBase64(pdfBlob);
@@ -1474,10 +1476,25 @@ async function regenerateMemo(requestId) {
 
     } catch (error) {
         console.error('regenerateMemo error:', error);
+        const isDrivePermission = error.message && error.message.includes('DriveApp');
         const isAbort = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
-        showAlert('ผิดพลาด', isAbort
-            ? 'เซิร์ฟเวอร์ PDF ใช้เวลานาน กรุณากดปุ่มอีกครั้ง (ครั้งที่ 2 จะเร็วขึ้น)'
-            : 'สร้าง PDF ไม่สำเร็จ: ' + error.message);
+
+        // ถ้า PDF สร้างสำเร็จแต่อัปโหลดล้มเหลว — เปิด PDF ให้ดาวน์โหลดได้เลย
+        if (generatedPdfBlob) {
+            const tempUrl = URL.createObjectURL(generatedPdfBlob);
+            window.open(tempUrl, '_blank');
+            showAlert('PDF สร้างสำเร็จ (บันทึกไม่ได้)',
+                isDrivePermission
+                    ? 'ไฟล์ PDF ถูกเปิดในหน้าต่างใหม่แล้ว\n\n' +
+                      'กรุณาดาวน์โหลดและแนบผ่านปุ่ม "ส่งบันทึก/แนบไฟล์"\n\n' +
+                      '⚠️ สาเหตุ: GAS ไม่มีสิทธิ์เข้าถึง Google Drive\n' +
+                      'ผู้ดูแลระบบต้องเปิดสิทธิ์ DriveApp ใน Google Apps Script'
+                    : 'ไฟล์ PDF ถูกเปิดในหน้าต่างใหม่แล้ว กรุณาดาวน์โหลดและแนบผ่านปุ่ม "ส่งบันทึก/แนบไฟล์"\nสาเหตุ: ' + error.message);
+        } else {
+            showAlert('ผิดพลาด', isAbort
+                ? 'เซิร์ฟเวอร์ PDF ใช้เวลานาน กรุณากดปุ่มอีกครั้ง (ครั้งที่ 2 จะเร็วขึ้น)'
+                : 'สร้าง PDF ไม่สำเร็จ: ' + error.message);
+        }
         if (btn) { btn.disabled = false; btn.textContent = '🖨️ สร้าง PDF อัตโนมัติ'; }
     }
 }
@@ -1532,6 +1549,7 @@ async function handleRequestFormSubmit(e) {
         let finalFileUrl = null;
         let pdfFailed = false;
         let pdfFailReason = '';
+        let localPdfBlob = null; // เก็บ blob ไว้เปิดให้ดาวน์โหลดถ้า upload ล้มเหลว
 
         try {
             // Step 2a: Render template → DOCX
@@ -1544,6 +1562,7 @@ async function handleRequestFormSubmit(e) {
                 doctype: 'memo'
             };
             const { pdfBlob } = await generateOfficialPDF(pdfData);
+            localPdfBlob = pdfBlob; // เก็บไว้ใช้ fallback
 
             // Step 2b: Upload → Google Drive
             setBtnStatus('กำลังบันทึกไฟล์...');
@@ -1605,14 +1624,25 @@ async function handleRequestFormSubmit(e) {
             await db.collection('requests').doc(docId).set(firestoreData, { merge: true });
         }
 
-        // เปิดไฟล์ให้ดู (ถ้ามี)
-        if (finalFileUrl) window.open(finalFileUrl, '_blank');
+        // เปิดไฟล์ให้ดู
+        if (finalFileUrl) {
+            window.open(finalFileUrl, '_blank');
+        } else if (localPdfBlob) {
+            // PDF สร้างสำเร็จแต่ upload ล้มเหลว → เปิด blob ให้ดาวน์โหลดได้เลย
+            window.open(URL.createObjectURL(localPdfBlob), '_blank');
+        }
 
         if (pdfFailed) {
+            const isDriveErr = pdfFailReason.includes('DriveApp');
             showAlert("สร้างเอกสารสำเร็จ",
-                `ได้รับเลขที่ ${realId} แล้ว แต่สร้างไฟล์ PDF ไม่สำเร็จ\n\n` +
-                `สาเหตุ: ${pdfFailReason}\n\n` +
-                `กรุณากดปุ่ม "🖨️ สร้าง PDF อัตโนมัติ" ในหน้าแดชบอร์ด`);
+                `ได้รับเลขที่ ${realId} แล้ว\n\n` +
+                (localPdfBlob
+                    ? 'ไฟล์ PDF ถูกเปิดในหน้าต่างใหม่ กรุณาดาวน์โหลดเก็บไว้\n\n'
+                    : '') +
+                (isDriveErr
+                    ? '⚠️ บันทึกไฟล์ไม่สำเร็จเพราะ GAS ไม่มีสิทธิ์ DriveApp\nผู้ดูแลระบบต้องแก้ไขสิทธิ์ใน Google Apps Script\n\n'
+                    : `สาเหตุ: ${pdfFailReason}\n\n`) +
+                'กรุณาใช้ปุ่ม "ส่งบันทึก/แนบไฟล์" เพื่อแนบไฟล์เข้าระบบ');
         } else {
             showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
         }
