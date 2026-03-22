@@ -1435,14 +1435,17 @@ async function regenerateMemo(requestId) {
     const user = getCurrentUser();
     if (!user) { showAlert('ผิดพลาด', 'กรุณาเข้าสู่ระบบใหม่'); return; }
 
-    // หาข้อมูลงานจาก cache
-    const req = (userRequestsCache || []).find(r => r.id === requestId);
+    // หาข้อมูลงานจาก cache (ค้นหาด้วย id หรือ requestId)
+    const req = (userRequestsCache || []).find(r => r.id === requestId || r.requestId === requestId);
     if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลงาน กรุณารีเฟรชหน้า'); return; }
 
     const btn = event?.currentTarget || document.querySelector(`button[onclick="regenerateMemo('${requestId}')"]`);
     if (btn) { btn.disabled = true; btn.textContent = '⏳ กำลังสร้าง PDF...'; }
 
+    let uploadSucceeded = false; // ใช้ flag แยกชัดเจนว่า upload สำเร็จหรือไม่
     let generatedPdfBlob = null;
+    let uploadedFileUrl = null;
+
     try {
         const pdfData = { ...req, id: requestId, requestId, doctype: 'memo' };
         const { pdfBlob } = await generateOfficialPDF(pdfData);
@@ -1460,21 +1463,27 @@ async function regenerateMemo(requestId) {
         });
         if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
 
-        const fileUrl = uploadRes.url;
+        uploadedFileUrl = uploadRes.url;
+        uploadSucceeded = true; // ✅ mark ว่า upload สำเร็จแล้ว ก่อน await ต่อไป
 
         // บันทึก fileUrl ลง Firebase
         if (typeof db !== 'undefined') {
             await db.collection('requests').doc(safeId).set({
-                fileUrl, pdfUrl: fileUrl, memoPdfUrl: fileUrl,
+                fileUrl: uploadedFileUrl, pdfUrl: uploadedFileUrl, memoPdfUrl: uploadedFileUrl,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
         }
 
         showAlert('สำเร็จ', 'สร้าง PDF เรียบร้อยแล้ว');
-        window.open(fileUrl, '_blank');
-        await fetchUserRequests(); // รีเฟรช dashboard
+        window.open(uploadedFileUrl, '_blank');
+
+        // รีเฟรช dashboard (แยก try-catch เพื่อไม่ให้ error นี้ trigger catch block ข้างบน)
+        try { await fetchUserRequests(); } catch (e) { console.warn('fetchUserRequests failed after success:', e); }
 
     } catch (error) {
+        // catch block นี้จะรันเฉพาะกรณี PDF/upload ล้มเหลวเท่านั้น (ไม่ใช่กรณี fetchUserRequests ล้มเหลว)
+        if (uploadSucceeded) return; // upload สำเร็จแล้ว — ไม่ต้องทำอะไรเพิ่ม
+
         console.error('regenerateMemo error:', error);
         const isDrivePermission = error.message && error.message.includes('DriveApp');
         const isAbort = error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.';
