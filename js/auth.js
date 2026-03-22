@@ -22,13 +22,22 @@ async function handleLogin(e) {
         let firebaseUser = null;
         let userData = null;
 
-        // 1. ลอง Login Firebase
+        // 1. ลอง Login Firebase (email/password)
         try {
             if (typeof firebase !== 'undefined') {
                 const userCredential = await firebase.auth().signInWithEmailAndPassword(email, firebasePassword);
                 firebaseUser = userCredential.user;
             }
-        } catch (firebaseError) { /* ข้าม */ }
+        } catch (firebaseError) {
+            // ถ้า email/password ไม่มีใน Firebase Auth → ใช้ Anonymous Auth แทน
+            // เพื่อให้ Firebase Storage rules (request.auth != null) ผ่านได้
+            try {
+                if (typeof firebase !== 'undefined') {
+                    const anonCredential = await firebase.auth().signInAnonymously();
+                    firebaseUser = anonCredential.user;
+                }
+            } catch (anonError) { /* ข้าม */ }
+        }
 
        // 2. เรียกตรวจสอบกับ Google Sheet (Hybrid Check)
         // เพื่อดึง "ตัวตนที่แท้จริง" (Real Identity)
