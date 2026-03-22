@@ -13,21 +13,11 @@ async function submitRequestWithHybrid(formData) {
             // สมมติใช้ template_memo.docx สำหรับบันทึกข้อความ
             const pdfBlob = await generatePdfFromCloudRun('template_memo.docx', formData);
             
-            // [แก้ไข] เปลี่ยนจาก uploadToStorage (Firebase) เป็น uploadGeneratedFile (GAS/Drive)
-            console.log("📤 Uploading to Google Drive via GAS...");
-            
-            // แปลง Blob เป็น Base64 เพื่อส่งผ่าน API
-            const base64Data = await blobToBase64(pdfBlob);
+            console.log("📤 Uploading to Firebase Storage...");
+
             const fileName = `memo_pending_${tempId}.pdf`;
 
-            // เรียก GAS ให้บันทึกไฟล์ลง Drive
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: base64Data,
-                filename: fileName,
-                mimeType: 'application/pdf',
-                username: formData.username || 'system',
-                folderType: 'temp' // (Optional) ถ้าฝั่ง GAS รองรับการแยกโฟลเดอร์
-            });
+            const uploadRes = await uploadToFirebaseStorage(pdfBlob, fileName, 'application/pdf', formData.username || 'system');
 
             if (uploadRes.status === 'success') {
                 preGeneratedUrl = uploadRes.url;
@@ -102,16 +92,9 @@ async function generateCommandHybrid(data) {
 
             const finalPdfBlob = await generatePdfFromCloudRun(templateName, data);
             
-            // [แก้ไข] เปลี่ยนจาก uploadToStorage เป็น uploadGeneratedFile (Drive)
             const filename = `command_${docId}_${Date.now()}.pdf`;
-            const base64Data = await blobToBase64(finalPdfBlob);
-            
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: base64Data,
-                filename: filename,
-                mimeType: 'application/pdf',
-                username: data.username || 'admin'
-            });
+
+            const uploadRes = await uploadToFirebaseStorage(finalPdfBlob, filename, 'application/pdf', data.username || 'admin');
 
             if (uploadRes.status === 'success') {
                 cloudRunUrl = uploadRes.url;

@@ -1456,16 +1456,8 @@ async function regenerateMemo(requestId) {
         const { pdfBlob } = await generateOfficialPDF(pdfData);
         generatedPdfBlob = pdfBlob;
 
-        // อัปโหลดไฟล์ไป Google Drive
-        const base64 = await blobToBase64(pdfBlob);
         const safeId = requestId.replace(/[\/\\\:\.\s]/g, '-');
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: base64,
-            filename: `memo_${safeId}.pdf`,
-            mimeType: 'application/pdf',
-            username: user.username,
-            requestId
-        });
+        const uploadRes = await uploadToFirebaseStorage(pdfBlob, `memo_${safeId}.pdf`, 'application/pdf', user.username);
         if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
 
         uploadedFileUrl = uploadRes.url;
@@ -1582,17 +1574,10 @@ async function handleRequestFormSubmit(e) {
             setBtnStatus('กำลังบันทึกไฟล์...');
             setOverlayMsg('กำลังอัปโหลดไฟล์...');
 
-            const finalBase64 = await blobToBase64(pdfBlob);
             const safeIdForFile = realId.replace(/[\/\\\:\.\s]/g, '-');
             const safeFilename = `memo_${safeIdForFile}.pdf`;
 
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: finalBase64,
-                filename: safeFilename,
-                mimeType: 'application/pdf',
-                username: user.username,
-                requestId: realId
-            });
+            const uploadRes = await uploadToFirebaseStorage(pdfBlob, safeFilename, 'application/pdf', user.username);
 
             if (uploadRes.status !== 'success') throw new Error("อัปโหลดไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
             if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
@@ -2097,16 +2082,10 @@ async function saveEditRequest() {
         // --- Step 2: อัปโหลดไฟล์ ---
         setBtnStatus('กำลังอัปโหลดไฟล์...');
         
-        const finalBase64 = await blobToBase64(pdfBlob);
         const safeId = formData.requestId.replace(/[\/\\\:\.\s]/g, '-');
         const filename = `memo_EDIT_${safeId}_${Date.now()}.pdf`;
 
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: finalBase64,
-            filename: filename,
-            mimeType: 'application/pdf',
-            username: formData.username
-        });
+        const uploadRes = await uploadToFirebaseStorage(pdfBlob, filename, 'application/pdf', formData.username);
 
         if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์แก้ไขไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
         if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
@@ -2220,13 +2199,7 @@ async function mergeAndBackfillPDF(requestId, mainPdfUrl, attachments, user) {
         const mergedBlob = await mergePDFs(mainBlob, attachmentUrls);
         
         // 4. อัปโหลดไฟล์ที่รวมเสร็จแล้ว (Merged PDF)
-        const mergedBase64 = await blobToBase64(mergedBlob);
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: mergedBase64,
-            filename: `merged_request_${requestId}_${Date.now()}.pdf`,
-            mimeType: 'application/pdf',
-            username: user.username
-        });
+        const uploadRes = await uploadToFirebaseStorage(mergedBlob, `merged_request_${requestId}_${Date.now()}.pdf`, 'application/pdf', user.username);
 
         if (uploadRes.status === 'success' && uploadRes.url) {
             const finalUrl = uploadRes.url;

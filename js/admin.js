@@ -264,20 +264,11 @@ async function handleAdminGenerateCommand() {
         const { pdfBlob, docxBlob } = await generateOfficialPDF(requestData);
         window.open(URL.createObjectURL(pdfBlob), '_blank');
         
-        const pdfBase64 = await blobToBase64(pdfBlob);
-        const docBase64 = await blobToBase64(docxBlob);
-        
-        // อัปโหลดไฟล์ PDF
-        const pdfUpload = await apiCall('POST', 'uploadGeneratedFile', {
-            data: pdfBase64, filename: `คำสั่ง_${requestId.replace(/\//g,'-')}.pdf`,
-            mimeType: 'application/pdf', username: requestData.createdby
-        });
-
-        // อัปโหลดไฟล์ Word
-        const docUpload = await apiCall('POST', 'uploadGeneratedFile', {
-            data: docBase64, filename: `คำสั่ง_${requestId.replace(/\//g,'-')}.docx`,
-            mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', username: requestData.createdby
-        });
+        const safeCommandId = requestId.replace(/\//g, '-');
+        const [pdfUpload, docUpload] = await Promise.all([
+            uploadToFirebaseStorage(pdfBlob, `คำสั่ง_${safeCommandId}.pdf`, 'application/pdf', requestData.createdby),
+            uploadToFirebaseStorage(docxBlob, `คำสั่ง_${safeCommandId}.docx`, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', requestData.createdby)
+        ]);
 
         if (pdfUpload.status === 'success') {
             requestData.preGeneratedPdfUrl = pdfUpload.url;
@@ -498,15 +489,8 @@ async function adminRegenerateMemoForUser(requestId) {
         const { pdfBlob } = await generateOfficialPDF(pdfData);
         generatedPdfBlob = pdfBlob;
 
-        const base64 = await blobToBase64(pdfBlob);
         const safeId = requestId.replace(/[\/\\\:\.\s]/g, '-');
-        const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-            data: base64,
-            filename: `memo_${safeId}.pdf`,
-            mimeType: 'application/pdf',
-            username: req.username || 'admin',
-            requestId
-        });
+        const uploadRes = await uploadToFirebaseStorage(pdfBlob, `memo_${safeId}.pdf`, 'application/pdf', req.username || 'admin');
         if (uploadRes.status !== 'success' || !uploadRes.url) throw new Error(uploadRes.message || 'อัปโหลดไม่สำเร็จ');
 
         uploadedFileUrl = uploadRes.url;
@@ -747,15 +731,8 @@ async function handleDispatchFormSubmit(e) {
             }
         }
 
-        // --- 4. Upload ไฟล์ขึ้น Cloud ---
-        const pdfBase64 = await blobToBase64(pdfBlob);
-        
-        const uploadResult = await apiCall('POST', 'uploadGeneratedFile', {
-            data: pdfBase64,
-            filename: `หนังสือส่ง_${requestId.replace(/[\/\\:\.]/g, '-')}.pdf`,
-            mimeType: 'application/pdf',
-            username: requestData.createdby
-        });
+        // --- 4. Upload ไฟล์ขึ้น Firebase Storage ---
+        const uploadResult = await uploadToFirebaseStorage(pdfBlob, `หนังสือส่ง_${requestId.replace(/[\/\\:\.]/g, '-')}.pdf`, 'application/pdf', requestData.createdby);
         
         if (uploadResult.status !== 'success') throw new Error("Upload failed: " + uploadResult.message);
         const permanentPdfUrl = uploadResult.url;
@@ -861,13 +838,7 @@ async function handleAdminGenerateMemo() {
             statusDiv.classList.remove('hidden');
         }
 
-        const pdfBase64 = await blobToBase64(pdfBlob);
-        const uploadResult = await apiCall('POST', 'uploadGeneratedFile', {
-            data: pdfBase64,
-            filename: `บันทึกข้อความ_${requestId.replace(/\//g,'-')}.pdf`,
-            mimeType: 'application/pdf',
-            username: requestData.createdby
-        });
+        const uploadResult = await uploadToFirebaseStorage(pdfBlob, `บันทึกข้อความ_${requestId.replace(/\//g, '-')}.pdf`, 'application/pdf', requestData.createdby);
 
         if (uploadResult.status !== 'success') throw new Error("Upload failed");
         const permanentPdfUrl = uploadResult.url;
@@ -1822,15 +1793,7 @@ async function handleSaveAnnouncement(e) {
         // ถ้ามีการอัปโหลดรูปใหม่
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
-            const fileObj = await fileToObject(file);
-            
-            // อัปโหลดไปเก็บที่ Drive (ใช้ API เดิม)
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: fileObj.data,
-                filename: `announcement_${Date.now()}.jpg`,
-                mimeType: file.type,
-                username: getCurrentUser().username
-            });
+            const uploadRes = await uploadToFirebaseStorage(file, `announcement_${Date.now()}.jpg`, file.type, getCurrentUser().username);
             
             if (uploadRes.status === 'success') {
                 imageUrl = uploadRes.url;

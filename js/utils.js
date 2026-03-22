@@ -243,3 +243,26 @@ async function mergePDFs(mainPdfBlob, attachmentFiles = []) {
         return mainPdfBlob;
     }
 }
+
+// --- FIREBASE STORAGE UPLOAD HELPER ---
+
+/**
+ * อัปโหลดไฟล์ (Blob/File) ขึ้น Firebase Storage
+ * @param {Blob|File} blob - ไฟล์ที่ต้องการอัปโหลด
+ * @param {string} filename - ชื่อไฟล์
+ * @param {string} mimeType - ประเภทไฟล์ (เช่น 'application/pdf')
+ * @param {string} username - ชื่อผู้ใช้ (ใช้จัดโฟลเดอร์)
+ * @returns {Promise<{status: string, url: string}>}
+ */
+async function uploadToFirebaseStorage(blob, filename, mimeType, username) {
+    if (typeof firebase === 'undefined' || !firebase.storage) {
+        throw new Error('Firebase Storage ไม่พร้อมใช้งาน');
+    }
+    const storage = firebase.storage();
+    const safeName = filename.replace(/[#\[\]*?]/g, '-');
+    const path = `uploads/${username || 'system'}/${safeName}`;
+    const ref = storage.ref(path);
+    const snapshot = await ref.put(blob, { contentType: mimeType });
+    const url = await snapshot.ref.getDownloadURL();
+    return { status: 'success', url };
+}

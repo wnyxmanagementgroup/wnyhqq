@@ -726,14 +726,7 @@ async function handleSaveAnnouncement(e) {
         // กรณีที่ 1: มีการอัปโหลดไฟล์ใหม่ (ให้ความสำคัญสูงสุด)
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
-            const fileObj = await fileToObject(file);
-            
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: fileObj.data,
-                filename: `announcement_${Date.now()}.jpg`,
-                mimeType: file.type,
-                username: getCurrentUser().username
-            });
+            const uploadRes = await uploadToFirebaseStorage(file, `announcement_${Date.now()}.jpg`, file.type, getCurrentUser().username);
             
             if (uploadRes.status === 'success') {
                 // ได้ลิงก์มาแล้ว แปลงเป็น Direct Link ทันที
@@ -909,15 +902,8 @@ async function handleMemoSubmitFromModal(e) {
                 const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
 
                 setMemoStatus('กำลังอัปโหลด...');
-                const mergedBase64 = await blobToBase64(mergedPdfBlob);
 
-                const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                    data: mergedBase64,
-                    filename: `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`,
-                    mimeType: 'application/pdf',
-                    username: user.username,
-                    requestId: requestId
-                });
+                const uploadRes = await uploadToFirebaseStorage(mergedPdfBlob, `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`, 'application/pdf', user.username);
 
                 if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
                 if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
