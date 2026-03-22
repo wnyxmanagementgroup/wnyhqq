@@ -1065,8 +1065,11 @@ async function generateOfficialPDF(requestData) {
 
     } catch (error) {
         console.error("PDF Generation Error:", error);
-        if (error.name === 'AbortError' || error.message === 'Fetch is aborted') {
-            throw new Error('ระบบสร้าง PDF ใช้เวลานานเกินกำหนด (อาจเกิดจากสัญญาณอินเทอร์เน็ตอ่อน หรือเซิร์ฟเวอร์ยังไม่พร้อม) กรุณากดพิมพ์เอกสารอีกครั้ง');
+        if (error.name === 'AbortError' || error.message === 'Fetch is aborted' || error.message === 'The operation was aborted.') {
+            throw new Error('[PDF-TIMEOUT] ระบบสร้าง PDF ใช้เวลานานเกินกำหนด กรุณากดปุ่ม "สร้าง PDF อัตโนมัติ" ในหน้าแดชบอร์ดอีกครั้ง (Cloud Run cold start)');
+        }
+        if (error.message === 'Failed to fetch' || error.message === 'NetworkError when attempting to fetch resource') {
+            throw new Error('[PDF-NETWORK] ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ PDF ได้ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่');
         }
         if (error.properties && error.properties.errors) {
             const errorMessages = error.properties.errors.map(e => e.properties.explanation).join("\n");

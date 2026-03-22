@@ -1531,10 +1531,12 @@ async function handleRequestFormSubmit(e) {
         // --- Steps 2-3: สร้าง PDF และอัปโหลด (อาจล้มเหลวได้ ระบบจะบันทึกคำขอไว้ก่อน) ---
         let finalFileUrl = null;
         let pdfFailed = false;
+        let pdfFailReason = '';
 
         try {
+            // Step 2a: Render template → DOCX
             setBtnStatus('กำลังสร้างไฟล์ PDF...');
-            setOverlayMsg('กำลังสร้างไฟล์ PDF...');
+            setOverlayMsg('กำลังเตรียมเอกสาร...');
             const pdfData = {
                 ...formData,
                 id: realId,
@@ -1543,7 +1545,7 @@ async function handleRequestFormSubmit(e) {
             };
             const { pdfBlob } = await generateOfficialPDF(pdfData);
 
-            // --- Step 3: อัปโหลดไฟล์ไป Google Drive ---
+            // Step 2b: Upload → Google Drive
             setBtnStatus('กำลังบันทึกไฟล์...');
             setOverlayMsg('กำลังอัปโหลดไฟล์...');
 
@@ -1564,8 +1566,9 @@ async function handleRequestFormSubmit(e) {
             finalFileUrl = uploadRes.url;
 
         } catch (pdfError) {
-            console.warn("⚠️ PDF/Upload failed (graceful fallback):", pdfError.message);
+            console.error("⚠️ PDF/Upload failed:", pdfError);
             pdfFailed = true;
+            pdfFailReason = pdfError.message || String(pdfError);
         }
 
         // --- Step 4: อัปเดตลิงก์กลับฐานข้อมูล ---
@@ -1606,7 +1609,10 @@ async function handleRequestFormSubmit(e) {
         if (finalFileUrl) window.open(finalFileUrl, '_blank');
 
         if (pdfFailed) {
-            showAlert("สร้างเอกสารสำเร็จ", `ได้รับเลขที่ ${realId} แล้ว แต่ไม่สามารถสร้างไฟล์ PDF อัตโนมัติได้\nกรุณากดปุ่ม "ส่งบันทึก/แนบไฟล์" ในหน้าแดชบอร์ดเพื่อแนบเอกสารด้วยตนเอง`);
+            showAlert("สร้างเอกสารสำเร็จ",
+                `ได้รับเลขที่ ${realId} แล้ว แต่สร้างไฟล์ PDF ไม่สำเร็จ\n\n` +
+                `สาเหตุ: ${pdfFailReason}\n\n` +
+                `กรุณากดปุ่ม "🖨️ สร้าง PDF อัตโนมัติ" ในหน้าแดชบอร์ด`);
         } else {
             showAlert("สำเร็จ", `สร้างเอกสารเลขที่ ${realId} เรียบร้อยแล้ว`);
         }

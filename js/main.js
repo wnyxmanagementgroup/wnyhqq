@@ -40,10 +40,18 @@ async function switchPage(targetPageId) {
         showReminderModal();
     }
     
-    if (targetPageId === 'form-page') { 
+    if (targetPageId === 'form-page') {
         // ฟอร์มควรรอให้รีเซ็ตเสร็จก่อน เพื่อป้องกันข้อมูลค้าง
-        await resetRequestForm(); 
-        setTimeout(() => { tryAutoFillRequester(); }, 100); 
+        await resetRequestForm();
+        setTimeout(() => { tryAutoFillRequester(); }, 100);
+        // Pre-warm Cloud Run PDF engine ขณะที่ผู้ใช้กรอกฟอร์ม
+        // (fire & forget — ไม่รอ ไม่ throw ถ้าล้มเหลว)
+        try {
+            const warmupUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
+                ? PDF_ENGINE_CONFIG.BASE_URL
+                : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
+            fetch(warmupUrl + '/health', { method: 'GET', mode: 'no-cors' }).catch(() => {});
+        } catch (_) {}
     }
     
     if (targetPageId === 'profile-page') {
