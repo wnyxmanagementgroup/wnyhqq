@@ -258,6 +258,15 @@ async function uploadToFirebaseStorage(blob, filename, mimeType, username) {
     if (typeof firebase === 'undefined' || !firebase.storage) {
         throw new Error('Firebase Storage ไม่พร้อมใช้งาน');
     }
+    // Firebase Storage rules ต้องการ request.auth != null
+    // ถ้า session นี้ยังไม่ได้ sign in ผ่าน Firebase Auth → sign in anonymously ก่อน
+    if (!firebase.auth().currentUser) {
+        try {
+            await firebase.auth().signInAnonymously();
+        } catch (authErr) {
+            console.warn('Anonymous sign-in failed:', authErr.message);
+        }
+    }
     const storage = firebase.storage();
     const safeName = filename.replace(/[#\[\]*?]/g, '-');
     const path = `uploads/${username || 'system'}/${safeName}`;
