@@ -368,19 +368,21 @@ function renderUserRequests(requests) {
 
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-        // ต้องส่ง: มี draftMemoUrl + ยังไม่ส่ง (completedMemoUrl)
-        // หรือ: ยังไม่มีไฟล์เลย + ยังไม่ส่ง (ให้ user แนบเองได้)
-        // หรือ: ตีกลับมาแก้ไข
         const hasPendingId = req.id && req.id !== 'รอเลขที่';
-        const notSentYet = !completedMemoUrl && !isCompleted && req.status !== 'ไม่อนุมัติ' && req.status !== 'ยกเลิก';
-        const needsToSend = (notSentYet && hasPendingId) || isFixing;
+        // แสดงปุ่มส่งบันทึกถ้า: ยังไม่ส่งบันทึก + มีเลขที่แล้ว + ไม่ถูกปฏิเสธ/ยกเลิก/รับไฟล์แล้ว
+        // หมายเหตุ: ออกคำสั่งแล้ว (completedCommandUrl) ไม่ได้หมายความว่าส่งบันทึกแล้ว
+        const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
+        const memoSent = !!completedMemoUrl;
+        const needsToSend = (!memoSent && hasPendingId && !trulyClosed) || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
             // สถานะนี้ต้องแสดงก่อนเสมอ แม้จะมี completedCommandUrl
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ เสร็จสิ้น/รับไฟล์ไปใช้งาน</span>`;
-        } else if (completedCommandUrl) {
+        } else if (completedCommandUrl && memoSent) {
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ อนุมัติ/ออกคำสั่งแล้ว</span>`;
+        } else if (completedCommandUrl && !memoSent) {
+            statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700 border border-purple-200 font-bold animate-pulse">📋 ออกคำสั่งแล้ว (รอส่งบันทึก)</span>`;
         } else if (isCompleted) {
              statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 border border-blue-200">☑️ ส่งแล้ว (รอคำสั่ง)</span>`;
         } else if (req.status === 'ไม่อนุมัติ') {
@@ -497,7 +499,7 @@ function renderUserRequests(requests) {
                         <p><strong>สถานที่:</strong> ${escapeHtml(req.location)}</p>
                         <p><strong>วันที่:</strong> ${formatDate(req.startDate)} - ${formatDate(req.endDate)}</p>
                     </div>
-                    ${needsToSend ? `<p class="text-xs text-orange-600 mt-2 font-bold flex items-center gap-1">👉 กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันข้อมูลเข้าระบบ</p>` : ''}
+                    ${needsToSend && completedCommandUrl ? `<p class="text-xs text-purple-700 mt-2 font-bold flex items-center gap-1">📋 แอดมินออกคำสั่งแล้ว — กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันเข้าระบบ</p>` : needsToSend ? `<p class="text-xs text-orange-600 mt-2 font-bold flex items-center gap-1">👉 กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันข้อมูลเข้าระบบ</p>` : ''}
                 </div>
                 
                 <div class="flex flex-col items-end gap-3 min-w-[200px]">
@@ -2319,11 +2321,13 @@ async function fetchPendingMemos() {
             const hasId = req.id && req.id !== '' && !req.id.includes('รอ');
             
             // เช็คสถานะเสร็จสิ้น
-            const isCompleted = 
-                req.status === 'เสร็จสิ้น' || 
-                req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || 
+            // หมายเหตุ: commandStatus='เสร็จสิ้น' คือออกคำสั่งแล้ว แต่ยังต้องส่งบันทึกได้อยู่
+            // จะถือว่า "เสร็จสิ้น" ก็ต่อเมื่อ ออกคำสั่งแล้ว + ส่งบันทึกแล้ว หรือสถานะ/memoStatus เสร็จสิ้น
+            const isCompleted =
+                req.status === 'เสร็จสิ้น' ||
+                req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
                 req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
-                req.commandStatus === 'เสร็จสิ้น'; // ถ้าออกคำสั่งแล้วถือว่าผ่านขั้นตอนนี้แล้ว
+                (req.commandStatus === 'เสร็จสิ้น' && !!req.completedMemoUrl); // ออกคำสั่ง + ส่งบันทึกครบแล้ว
 
             // เช็คสถานะแก้ไข
             const isFixing = req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข';
@@ -2363,9 +2367,12 @@ function renderPendingMemos(requests) {
     container.innerHTML = requests.map(req => {
         const safeId = escapeHtml(req.id);
         const isFixing = req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข';
-        
-        let statusBadge = isFixing 
+        const hasCommand = !!(req.commandStatus === 'เสร็จสิ้น' || req.commandPdfUrl || req.commandBookUrl || req.completedCommandUrl);
+
+        let statusBadge = isFixing
             ? `<span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded border border-red-200">⚠️ ตีกลับให้แก้ไข</span>`
+            : hasCommand
+            ? `<span class="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded border border-green-200">📋 ออกคำสั่งแล้ว (รอส่งบันทึก)</span>`
             : `<span class="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-1 rounded border border-yellow-200">⏳ รอส่งบันทึก</span>`;
 
         // ปุ่มดูไฟล์ (เพื่อให้ดูเลขที่/รายละเอียดก่อนแนบ)
@@ -2403,18 +2410,44 @@ function renderPendingMemos(requests) {
 }
 
 // ฟังก์ชันเปิด Modal จากหน้านี้ (เพิ่ม Global Function)
-window.openSendMemoFromList = function(requestId) {
-    document.getElementById('memo-modal-request-id').value = requestId;
-    
-    // Reset Form
-    document.getElementById('send-memo-form').reset();
-    
-    // Trigger การตรวจสอบเงื่อนไข Radio Button (เพื่อให้ UI อัปเดต)
-    const nonReimburseRadio = document.getElementById('memo_type_non_reimburse');
-    if(nonReimburseRadio) {
-        nonReimburseRadio.checked = true; // Default เป็นแบบไม่เบิก (แนบไฟล์)
-        nonReimburseRadio.dispatchEvent(new Event('change'));
+window.openSendMemoFromList = async function(requestId) {
+    // ตรวจสอบว่าส่งบันทึกไปแล้วหรือยัง
+    const allData = (typeof userRequestsCache !== 'undefined' && userRequestsCache.length > 0)
+        ? userRequestsCache
+        : (typeof allRequestsCache !== 'undefined' ? allRequestsCache : []);
+    const reqData = allData.find(r => r.id === requestId || r.requestId === requestId);
+
+    if (reqData && reqData.completedMemoUrl) {
+        // ค้นหาว่าใครส่ง และเมื่อไหร่
+        const memoData = (typeof allMemosCache !== 'undefined')
+            ? allMemosCache.find(m => m.refNumber === requestId || m.id === requestId)
+            : null;
+        const submittedBy = (memoData && memoData.submittedBy) || reqData.submittedBy || '';
+        const submittedAt = (memoData && (memoData.submittedAt || memoData.lastUpdated)) || reqData.lastUpdated || '';
+
+        let dateStr = '';
+        if (submittedAt) {
+            try {
+                const d = submittedAt.toDate ? submittedAt.toDate() : new Date(submittedAt);
+                dateStr = d.toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+            } catch(e) {}
+        }
+
+        const byLine = submittedBy ? `โดย ${submittedBy}` : '';
+        const whenLine = dateStr ? ` เมื่อวันที่ ${dateStr}` : '';
+        const confirmed = await showConfirm(
+            '⚠️ ส่งบันทึกซ้ำ',
+            `บันทึกเลขที่ ${requestId} ถูกส่งไปแล้ว${byLine}${whenLine}\n\nต้องการส่งบันทึกใหม่/แทนที่ของเดิมหรือไม่?`
+        );
+        if (!confirmed) return;
     }
 
+    document.getElementById('memo-modal-request-id').value = requestId;
+    document.getElementById('send-memo-form').reset();
+    const nonReimburseRadio = document.getElementById('memo_type_non_reimburse');
+    if(nonReimburseRadio) {
+        nonReimburseRadio.checked = true;
+        nonReimburseRadio.dispatchEvent(new Event('change'));
+    }
     document.getElementById('send-memo-modal').style.display = 'flex';
 };
