@@ -267,7 +267,9 @@ async function fetchUserRequests() {
                             adminMemoUrl: fbDoc.adminMemoUrl || req.adminMemoUrl,
                             adminCommandUrl: fbDoc.adminCommandUrl || req.adminCommandUrl,
                             adminDispatchUrl: fbDoc.adminDispatchUrl || req.adminDispatchUrl,
+                            // status และ memoStatus: Firebase มีลำดับก่อน เพราะอัปเดตล่าสุด
                             status: fbDoc.status || req.status,
+                            memoStatus: fbDoc.memoStatus || req.memoStatus,
                             commandStatus: fbDoc.commandStatus || req.commandStatus
                         };
                     }
@@ -370,16 +372,18 @@ function renderUserRequests(requests) {
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
         const hasPendingId = req.id && req.id !== 'รอเลขที่';
+        // isDone: รวม status และ memoStatus เพื่อรองรับข้อมูลเก่าใน GAS ที่เก็บเป็น memoStatus
+        const isDone = req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
         // ปิดปุ่มเฉพาะเมื่อแอดมินตั้งสถานะ "เสร็จสิ้น/รับไฟล์ไปใช้งาน" หรือ ไม่อนุมัติ/ยกเลิก
         // completedMemoUrl ที่มีค่า ≠ ปิดปุ่ม (ผู้ใช้ยังส่งใหม่ได้จนกว่าแอดมินจะปิด)
-        const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
+        const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || isDone;
         const memoSent = !!completedMemoUrl; // ใช้สำหรับแสดง badge และข้อความเท่านั้น
         const needsToSend = (hasPendingId && !trulyClosed) || isFixing;
         // canEdit: แก้ไขได้จนกว่าแอดมินจะปิดงาน (steps 1 & 2 ยังแก้ได้, step 3 ปิดแล้ว)
         const canEdit = !trulyClosed;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
-        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+        if (isDone) {
             // สถานะนี้ต้องแสดงก่อนเสมอ แม้จะมี completedCommandUrl
             statusBadge = `<span class="px-2 py-1 rounded-full text-xs bg-green-100 text-green-700 border border-green-200">✅ เสร็จสิ้น/รับไฟล์ไปใช้งาน</span>`;
         } else if (completedCommandUrl && memoSent) {
@@ -401,7 +405,7 @@ function renderUserRequests(requests) {
         // --- Action Buttons ---
         let actionButtons = '';
 
-        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+        if (isDone) {
             // ขั้นตอนที่ 3: แอดมินอัปโหลดไฟล์กลับคืนและปิดงานแล้ว
             // แทนที่ปุ่มดูบันทึกด้วยกล่อง "รับไฟล์กลับไปใช้งาน" ครบทั้ง 3 ไฟล์
             // ปิดปุ่มส่งบันทึกทั้งหมด
@@ -482,7 +486,7 @@ function renderUserRequests(requests) {
 
         // กำหนดสีขอบซ้ายตามสถานะ
         let borderClass = 'border-l-gray-300';
-        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') borderClass = 'border-l-emerald-500';
+        if (isDone) borderClass = 'border-l-emerald-500';
         else if (completedCommandUrl) borderClass = 'border-l-green-500';
         else if (isCompleted) borderClass = 'border-l-blue-500';
         else if (needsToSend) borderClass = 'border-l-orange-500';
