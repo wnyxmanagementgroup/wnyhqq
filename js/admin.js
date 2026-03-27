@@ -1433,11 +1433,23 @@ async function handleAdminMemoActionSubmit(e) {
                  if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
                  if (urls.dispatchBookUrl) updateData.adminDispatchUrl = urls.dispatchBookUrl;
 
-                 // หา refNumber จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
+                 // หา refNumber และ username จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
                  // (memo.id อาจ ≠ req.id ที่ผู้ใช้ใช้ fetch)
                  const memoEntry = allMemosCache.find(m => m.id === memoId);
                  const refNumber = memoEntry?.refNumber;
+                 const submittedBy = memoEntry?.submittedBy || memoEntry?.username;
                  const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
+
+                 // ใส่ username ด้วยเสมอ เพื่อให้ user query ด้วย where('username') เจอ document นี้
+                 // (ถ้า document ถูกสร้างใหม่โดยแอดมิน จะไม่มี username → user query ไม่เจอ)
+                 if (submittedBy) {
+                     updateData.username = submittedBy;
+                 }
+                 // เพิ่ม id/requestId ใน document เพื่อให้ firebaseData lookup เจอได้
+                 if (refNumber) {
+                     updateData.id = refNumber;
+                     updateData.requestId = refNumber;
+                 }
 
                  try {
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });

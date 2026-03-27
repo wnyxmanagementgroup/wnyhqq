@@ -287,6 +287,52 @@ async function fetchUserRequests() {
                         gasIdSet.add(reqId); // กัน duplicate
                     }
                 });
+
+                // ★ Fallback: ดึง Firebase doc ตรงๆ สำหรับ request ที่ยังไม่ถูก merge
+                // (ข้อมูลเก่าก่อนมี Firebase: admin อาจ save ไปโดยไม่มี username field
+                //  ทำให้ where('username') query ไม่เจอ → ต้อง fetch โดยตรงด้วย doc.id)
+                const unmatched = requests.filter(req => {
+                    if (!req.id) return false;
+                    const safeId = req.id.replace(/[\/\\:\.\s]/g, '-');
+                    return !firebaseData[req.id] && !firebaseData[safeId];
+                });
+                if (unmatched.length > 0) {
+                    const directFetches = unmatched.map(async req => {
+                        const safeId = req.id.replace(/[\/\\:\.\s]/g, '-');
+                        try {
+                            const docSnap = await db.collection('requests').doc(safeId).get();
+                            if (docSnap.exists) {
+                                firebaseData[req.id] = docSnap.data();
+                                firebaseData[safeId] = docSnap.data();
+                            }
+                        } catch (_) {}
+                    });
+                    await Promise.all(directFetches);
+
+                    // Re-merge unmatched requests that now have data
+                    requests = requests.map(req => {
+                        if (!req.id) return req;
+                        const safeId = req.id.replace(/[\/\\:\.\s]/g, '-');
+                        const fbDoc = firebaseData[req.id] || firebaseData[safeId] || null;
+                        if (!fbDoc) return req;
+                        return {
+                            ...req,
+                            fileUrl: fbDoc.fileUrl || req.fileUrl,
+                            pdfUrl: fbDoc.pdfUrl || req.pdfUrl,
+                            memoPdfUrl: fbDoc.memoPdfUrl || req.memoPdfUrl,
+                            completedMemoUrl: fbDoc.completedMemoUrl || req.completedMemoUrl,
+                            completedCommandUrl: fbDoc.completedCommandUrl || req.completedCommandUrl,
+                            commandPdfUrl: fbDoc.commandPdfUrl || fbDoc.commandBookUrl || req.commandPdfUrl,
+                            dispatchBookUrl: fbDoc.dispatchBookUrl || fbDoc.dispatchBookPdfUrl || req.dispatchBookUrl,
+                            adminMemoUrl: fbDoc.adminMemoUrl || req.adminMemoUrl,
+                            adminCommandUrl: fbDoc.adminCommandUrl || req.adminCommandUrl,
+                            adminDispatchUrl: fbDoc.adminDispatchUrl || req.adminDispatchUrl,
+                            status: fbDoc.status || req.status,
+                            memoStatus: fbDoc.memoStatus || req.memoStatus,
+                            commandStatus: fbDoc.commandStatus || req.commandStatus
+                        };
+                    });
+                }
             } catch (e) {
                 console.warn('Firebase query error:', e.code || e.message);
             }
@@ -468,20 +514,8 @@ function renderUserRequests(requests) {
                     ✏️ แก้ไขบันทึก
                 </button>`;
             }
-
-            // แสดงไฟล์คำสั่ง/หนังสือส่งถ้าแอดมินอัปโหลดแล้ว (ขั้นตอนที่ 2)
-            if (completedCommandUrl) {
-                actionButtons += `
-                <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
-                    📋 คำสั่ง
-                </a>`;
-            }
-            if (dispatchBookUrl) {
-                actionButtons += `
-                <a href="${dispatchBookUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
-                    📦 หนังสือส่ง
-                </a>`;
-            }
+            // หมายเหตุ: ไฟล์คำสั่ง/หนังสือส่งจะแสดงเฉพาะขั้นตอนที่ 3 (isDone) เท่านั้น
+            // ผู้ใช้จะเห็นไฟล์เหล่านี้ผ่านกล่อง "รับไฟล์กลับไปใช้งาน"
         }
 
         // กำหนดสีขอบซ้ายตามสถานะ
