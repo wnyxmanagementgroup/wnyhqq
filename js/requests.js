@@ -366,14 +366,15 @@ function renderUserRequests(requests) {
         const adminCommandUrl = req.adminCommandUrl;
         const adminDispatchUrl = req.adminDispatchUrl;
 
+        // isCompleted: ใช้เฉพาะแสดง badge "ส่งแล้ว" ไม่ใช้ซ่อนปุ่ม
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
         const hasPendingId = req.id && req.id !== 'รอเลขที่';
-        // แสดงปุ่มส่งบันทึกถ้า: ยังไม่ส่งบันทึก + มีเลขที่แล้ว + ไม่ถูกปฏิเสธ/ยกเลิก/รับไฟล์แล้ว
-        // หมายเหตุ: ออกคำสั่งแล้ว (completedCommandUrl) ไม่ได้หมายความว่าส่งบันทึกแล้ว
+        // ปิดปุ่มเฉพาะเมื่อแอดมินตั้งสถานะ "เสร็จสิ้น/รับไฟล์ไปใช้งาน" หรือ ไม่อนุมัติ/ยกเลิก
+        // completedMemoUrl ที่มีค่า ≠ ปิดปุ่ม (ผู้ใช้ยังส่งใหม่ได้จนกว่าแอดมินจะปิด)
         const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
-        const memoSent = !!completedMemoUrl;
-        const needsToSend = (!memoSent && hasPendingId && !trulyClosed) || isFixing;
+        const memoSent = !!completedMemoUrl; // ใช้สำหรับแสดง badge และข้อความเท่านั้น
+        const needsToSend = (hasPendingId && !trulyClosed) || isFixing;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
@@ -398,14 +399,22 @@ function renderUserRequests(requests) {
         // --- Action Buttons ---
         let actionButtons = '';
 
-        // ปุ่มส่งบันทึก
+        // ปุ่มส่งบันทึก — แสดงจนกว่าแอดมินจะปิด (trulyClosed)
         if (needsToSend) {
-            actionButtons += `
+            if (memoSent) {
+                // ส่งแล้ว แต่ยังไม่ถูกปิดโดยแอดมิน — แสดงปุ่มขนาดเล็กลง ไม่กระพริบ
+                actionButtons += `
+                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-400 hover:bg-orange-500 text-white btn-sm flex items-center gap-1 shadow-sm border border-orange-300">
+                    <span>📤</span> ส่งบันทึกอีกครั้ง
+                </button>`;
+            } else {
+                actionButtons += `
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
                     <span>📤</span> ส่งบันทึก/แนบไฟล์
                 </button>`;
+            }
             // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF / ถ้ามีแล้ว — แสดงปุ่มดู
-            if (!draftMemoUrl) {
+            if (!draftMemoUrl && !memoSent) {
                 actionButtons += `
                 <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
                     🖨️ สร้าง PDF อัตโนมัติ
@@ -499,7 +508,7 @@ function renderUserRequests(requests) {
                         <p><strong>สถานที่:</strong> ${escapeHtml(req.location)}</p>
                         <p><strong>วันที่:</strong> ${formatDate(req.startDate)} - ${formatDate(req.endDate)}</p>
                     </div>
-                    ${needsToSend && completedCommandUrl ? `<p class="text-xs text-purple-700 mt-2 font-bold flex items-center gap-1">📋 แอดมินออกคำสั่งแล้ว — กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันเข้าระบบ</p>` : needsToSend ? `<p class="text-xs text-orange-600 mt-2 font-bold flex items-center gap-1">👉 กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันข้อมูลเข้าระบบ</p>` : ''}
+                    ${needsToSend && completedCommandUrl && !memoSent ? `<p class="text-xs text-purple-700 mt-2 font-bold flex items-center gap-1">📋 แอดมินออกคำสั่งแล้ว — กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันเข้าระบบ</p>` : needsToSend && !memoSent ? `<p class="text-xs text-orange-600 mt-2 font-bold flex items-center gap-1">👉 กรุณากดปุ่ม "ส่งบันทึก" เพื่อยืนยันข้อมูลเข้าระบบ</p>` : ''}
                 </div>
                 
                 <div class="flex flex-col items-end gap-3 min-w-[200px]">
@@ -1465,12 +1474,24 @@ async function regenerateMemo(requestId) {
         uploadedFileUrl = uploadRes.url;
         uploadSucceeded = true; // ✅ mark ว่า upload สำเร็จแล้ว ก่อน await ต่อไป
 
-        // บันทึก fileUrl ลง Firebase
+        // บันทึก fileUrl ลง Firebase Firestore
         if (typeof db !== 'undefined') {
             await db.collection('requests').doc(safeId).set({
                 fileUrl: uploadedFileUrl, pdfUrl: uploadedFileUrl, memoPdfUrl: uploadedFileUrl,
                 lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             }, { merge: true });
+        }
+
+        // บันทึก fileUrl ลง Google Sheets ด้วย (สำคัญ: ไม่งั้น Sheet จะไม่มีลิงก์ PDF)
+        try {
+            await apiCall('POST', 'updateRequest', {
+                requestId: requestId,
+                fileUrl: uploadedFileUrl,
+                pdfUrl: uploadedFileUrl,
+                memoPdfUrl: uploadedFileUrl
+            });
+        } catch (gasErr) {
+            console.warn('updateRequest to GAS failed (non-critical):', gasErr.message);
         }
 
         showAlert('สำเร็จ', 'สร้าง PDF เรียบร้อยแล้ว');
@@ -2316,30 +2337,25 @@ async function fetchPendingMemos() {
         }
 
         // ★ กรองเฉพาะรายการที่ต้องส่งบันทึก ★
-        // เงื่อนไข: (มีเลขที่เอกสาร) AND (ยังไม่เสร็จสิ้น OR สถานะ = นำกลับไปแก้ไข)
+        // ออกแบบ: ปุ่มส่งบันทึกคงอยู่จนกว่าแอดมินเปลี่ยนสถานะเป็น "เสร็จสิ้น/รับไฟล์ไปใช้งาน"
+        // completedMemoUrl ที่มีค่า ≠ ซ่อนรายการ (ผู้ใช้ส่งได้อีกจนกว่าแอดมินปิด)
         const pendingRequests = requests.filter(req => {
             const hasId = req.id && req.id !== '' && !req.id.includes('รอ');
-            
-            // เช็คสถานะเสร็จสิ้น
-            // หมายเหตุ: commandStatus='เสร็จสิ้น' คือออกคำสั่งแล้ว แต่ยังต้องส่งบันทึกได้อยู่
-            // จะถือว่า "เสร็จสิ้น" ก็ต่อเมื่อ ออกคำสั่งแล้ว + ส่งบันทึกแล้ว หรือสถานะ/memoStatus เสร็จสิ้น
-            const isCompleted =
-                req.status === 'เสร็จสิ้น' ||
+
+            // ปิดรายการเฉพาะสถานะสุดท้ายที่แอดมินตั้งเท่านั้น
+            const isClosed =
                 req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
                 req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
-                (req.commandStatus === 'เสร็จสิ้น' && !!req.completedMemoUrl); // ออกคำสั่ง + ส่งบันทึกครบแล้ว
+                req.status === 'ไม่อนุมัติ' ||
+                req.status === 'ยกเลิก';
 
             // เช็คสถานะแก้ไข
             const isFixing = req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข';
-            
-            // ยังไม่มีไฟล์แนบ (หรือมีแต่ต้องแก้) และยังไม่จบกระบวนการ
-            // หมายเหตุ: เช็ค completedMemoUrl ด้วย เพราะบางทีอาจจะส่งแล้วแต่ status ยังไม่อัปเดต
-            const hasMemoFile = req.completedMemoUrl && req.completedMemoUrl !== "";
 
             if (!hasId) return false; // ไม่มีเลข ไม่ต้องแสดง
-            
-            // แสดงถ้า: (ต้องแก้ไข) หรือ (ยังไม่เสร็จ และ ยังไม่มีไฟล์แนบสมบูรณ์)
-            return isFixing || (!isCompleted && !hasMemoFile);
+
+            // แสดงถ้า: ยังไม่ถูกปิด (ไม่ว่าจะส่งบันทึกแล้วหรือยัง)
+            return !isClosed || isFixing;
         });
 
         // เรียงลำดับ (เก่า -> ใหม่ จะได้รีบเคลียร์ของเก่า)
@@ -2368,9 +2384,14 @@ function renderPendingMemos(requests) {
         const safeId = escapeHtml(req.id);
         const isFixing = req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข';
         const hasCommand = !!(req.commandStatus === 'เสร็จสิ้น' || req.commandPdfUrl || req.commandBookUrl || req.completedCommandUrl);
+        const alreadySent = !!(req.completedMemoUrl);
 
         let statusBadge = isFixing
             ? `<span class="bg-red-100 text-red-700 text-xs font-bold px-2 py-1 rounded border border-red-200">⚠️ ตีกลับให้แก้ไข</span>`
+            : alreadySent && hasCommand
+            ? `<span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded border border-blue-200">☑️ ส่งแล้ว + ออกคำสั่งแล้ว</span>`
+            : alreadySent
+            ? `<span class="bg-blue-100 text-blue-700 text-xs font-bold px-2 py-1 rounded border border-blue-200">☑️ ส่งแล้ว (รอแอดมินปิด)</span>`
             : hasCommand
             ? `<span class="bg-green-100 text-green-700 text-xs font-bold px-2 py-1 rounded border border-green-200">📋 ออกคำสั่งแล้ว (รอส่งบันทึก)</span>`
             : `<span class="bg-yellow-100 text-yellow-700 text-xs font-bold px-2 py-1 rounded border border-yellow-200">⏳ รอส่งบันทึก</span>`;
@@ -2398,11 +2419,16 @@ function renderPendingMemos(requests) {
                     </div>
                 </div>
                 
-                <div class="w-full sm:w-auto">
-                    <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto shadow-md flex items-center justify-center gap-2 py-2 px-6">
-                        <span>📤</span>
-                        <span>ส่งบันทึก/แนบไฟล์</span>
-                    </button>
+                <div class="w-full sm:w-auto flex flex-col gap-2">
+                    ${alreadySent
+                        ? `<button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-400 hover:bg-orange-500 text-white w-full sm:w-auto shadow-sm flex items-center justify-center gap-2 py-2 px-6 border border-orange-300">
+                                <span>📤</span><span>ส่งบันทึกอีกครั้ง</span>
+                           </button>`
+                        : `<button onclick="openSendMemoFromList('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white w-full sm:w-auto shadow-md flex items-center justify-center gap-2 py-2 px-6 animate-pulse">
+                                <span>📤</span><span>ส่งบันทึก/แนบไฟล์</span>
+                           </button>`
+                    }
+                    ${req.completedMemoUrl ? `<a href="${req.completedMemoUrl}" target="_blank" class="text-center text-xs text-blue-600 hover:underline">📄 ดูบันทึกที่ส่งไว้</a>` : ''}
                 </div>
             </div>
         </div>`;
