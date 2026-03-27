@@ -375,6 +375,8 @@ function renderUserRequests(requests) {
         const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
         const memoSent = !!completedMemoUrl; // ใช้สำหรับแสดง badge และข้อความเท่านั้น
         const needsToSend = (hasPendingId && !trulyClosed) || isFixing;
+        // canEdit: ต้องประกาศก่อน actionButtons เพราะถูกใช้ใน if(needsToSend) block
+        const canEdit = !completedCommandUrl;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
@@ -483,10 +485,6 @@ function renderUserRequests(requests) {
                 </a>`;
             }
         }
-
-        // --- 3. เงื่อนไขการแก้ไข/ลบ ---
-        // อนุญาตให้แก้ไขได้ตราบใดที่ "ยังไม่มีคำสั่ง" (แม้จะส่งบันทึกแล้วก็ตาม)
-        const canEdit = !completedCommandUrl;
 
         // กำหนดสีขอบซ้ายตามสถานะ
         let borderClass = 'border-l-gray-300';
