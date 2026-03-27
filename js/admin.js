@@ -367,6 +367,25 @@ function renderAdminRequestsList(requests) {
         const safeLocation = escapeHtml(request.location);
         const safeDate = `${formatDisplayDate(request.startDate)} - ${formatDisplayDate(request.endDate)}`;
 
+        // --- ปุ่มเปลี่ยนสถานะโดยตรง (สำหรับรายการที่ยังไม่สิ้นสุด) ---
+        const effectiveStatus = request.status || request.memoStatus || '';
+        const isEnded = effectiveStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                        effectiveStatus === 'ไม่อนุมัติ' || effectiveStatus === 'ยกเลิก';
+        let currentStatusBadge = '';
+        if (effectiveStatus && effectiveStatus !== 'Pending') {
+            const badgeColors = {
+                'เสร็จสิ้น/รับไฟล์ไปใช้งาน': 'bg-emerald-100 text-emerald-700',
+                'ไม่อนุมัติ': 'bg-red-100 text-red-700',
+                'ยกเลิก': 'bg-red-100 text-red-700',
+                'นำกลับไปแก้ไข': 'bg-orange-100 text-orange-700'
+            };
+            const badgeClass = badgeColors[effectiveStatus] || 'bg-blue-100 text-blue-700';
+            currentStatusBadge = `<span class="text-xs px-2 py-0.5 rounded-full ${badgeClass}">${effectiveStatus}</span>`;
+        }
+        const directStatusBtn = !isEnded
+            ? `<button onclick="openAdminDirectStatus('${safeId}')" class="btn bg-slate-600 hover:bg-slate-700 text-white btn-sm flex items-center gap-1 shadow-sm px-2">🔄 เปลี่ยนสถานะ</button>`
+            : `<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">✅ ปิดงานแล้ว</span>`;
+
         // --- ปุ่มหนังสือส่ง ---
         const dispatchUrl = request.dispatchBookUrl || request.dispatchBookPdfUrl;
         let dispatchButtonHtml = '';
@@ -445,6 +464,7 @@ function renderAdminRequestsList(requests) {
                         <span class="text-xs px-2 py-0.5 rounded-full ${request.commandPdfUrl ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}">
                             ${request.commandPdfUrl ? 'ออกคำสั่งแล้ว' : 'รอออกคำสั่ง'}
                         </span>
+                        ${currentStatusBadge}
                         ${expenseBadge} ${dispatchUrl ? `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">มีหนังสือส่ง</span>` : ''}
                     </div>
                     <p class="text-gray-800 font-bold text-md mb-1">${safeName}</p>
@@ -461,6 +481,7 @@ function renderAdminRequestsList(requests) {
                 <div class="flex flex-col gap-2 w-full md:w-auto items-end">
                     <div class="flex flex-wrap gap-2 justify-end items-center">
                         ${userDraftPdfSection}
+                        ${directStatusBtn}
                         <button onclick="deleteRequestByAdmin('${safeId}')" class="text-xs text-red-500 hover:text-red-700 underline flex items-center gap-1">🗑️ ลบรายการ</button>
                     </div>
                     ${commandActionButtons}
@@ -1615,6 +1636,127 @@ async function deleteRequestByAdmin(requestId) {
         await fetchAllRequestsForCommand();
     }
 }
+
+// ====== เมนูเปลี่ยนสถานะโดยตรง (Admin Direct Status Change) ======
+
+function openAdminDirectStatus(requestId) {
+    if (!checkAdminAccess()) return;
+
+    const req = (allRequestsCache || []).find(r => r.id === requestId || r.requestId === requestId);
+    if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลรายการ กรุณารีเฟรชหน้า'); return; }
+
+    document.getElementById('admin-direct-request-id').value = requestId;
+    document.getElementById('admin-direct-username').value = req.username || req.submittedBy || '';
+    document.getElementById('admin-direct-status-select').value = '';
+    document.getElementById('admin-direct-file-section').classList.add('hidden');
+    document.getElementById('admin-direct-memo-file').value = '';
+    document.getElementById('admin-direct-command-file').value = '';
+    document.getElementById('admin-direct-dispatch-file').value = '';
+
+    const currentStatus = req.status || req.memoStatus || 'ไม่ระบุ';
+    document.getElementById('admin-direct-status-info').innerHTML = `
+        <strong>เลขที่:</strong> ${escapeHtml(requestId)}<br>
+        <strong>ผู้ขอ:</strong> ${escapeHtml(req.requesterName || '-')}<br>
+        <strong>เรื่อง:</strong> ${escapeHtml(req.purpose || '-')}<br>
+        <strong>สถานะปัจจุบัน:</strong> <span class="font-bold">${escapeHtml(currentStatus)}</span>`;
+
+    document.getElementById('admin-direct-status-modal').style.display = 'flex';
+}
+
+async function handleAdminDirectStatusSubmit(e) {
+    e.preventDefault();
+    const requestId = document.getElementById('admin-direct-request-id').value;
+    const username = document.getElementById('admin-direct-username').value;
+    const newStatus = document.getElementById('admin-direct-status-select').value;
+    if (!newStatus) { showAlert('ผิดพลาด', 'กรุณาเลือกสถานะ'); return; }
+
+    const memoFile = document.getElementById('admin-direct-memo-file').files[0];
+    const commandFile = document.getElementById('admin-direct-command-file').files[0];
+    const dispatchFile = document.getElementById('admin-direct-dispatch-file').files[0];
+
+    toggleLoader('admin-direct-status-submit', true);
+    try {
+        const safeId = requestId.replace(/[\/\\:\.\s]/g, '-');
+        const updatePayload = { requestId, status: newStatus };
+
+        // อัปโหลดไฟล์ถ้ามี (เฉพาะสถานะเสร็จสิ้น/รับไฟล์)
+        if (newStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            const uploadFile = async (file, prefix) => {
+                if (!file) return null;
+                const obj = await fileToObject(file);
+                const res = await apiCall('POST', 'uploadAdminFile', { file: obj, filename: `${prefix}_${safeId}` });
+                return (res.status === 'success' && res.url) ? res.url : null;
+            };
+
+            const [adminMemoUrl, adminCommandUrl, adminDispatchUrl] = await Promise.all([
+                uploadFile(memoFile, 'memo'),
+                uploadFile(commandFile, 'command'),
+                uploadFile(dispatchFile, 'dispatch')
+            ]);
+
+            if (adminMemoUrl) updatePayload.adminMemoUrl = adminMemoUrl;
+            if (adminCommandUrl) updatePayload.adminCommandUrl = adminCommandUrl;
+            if (adminDispatchUrl) updatePayload.adminDispatchUrl = adminDispatchUrl;
+
+            // Fallback: อัปโหลดผ่าน Firebase Storage ตรงถ้า GAS ไม่รองรับ uploadAdminFile
+            const uploadViaStorage = async (file, prefix) => {
+                if (!file) return null;
+                const blob = new Blob([file], { type: file.type });
+                const res = await uploadToFirebaseStorage(blob, `admin_${prefix}_${safeId}.pdf`, file.type, 'admin');
+                return (res.status === 'success' && res.url) ? res.url : null;
+            };
+            if (memoFile && !adminMemoUrl) {
+                const url = await uploadViaStorage(memoFile, 'memo');
+                if (url) updatePayload.adminMemoUrl = url;
+            }
+            if (commandFile && !adminCommandUrl) {
+                const url = await uploadViaStorage(commandFile, 'command');
+                if (url) updatePayload.adminCommandUrl = url;
+            }
+            if (dispatchFile && !adminDispatchUrl) {
+                const url = await uploadViaStorage(dispatchFile, 'dispatch');
+                if (url) updatePayload.adminDispatchUrl = url;
+            }
+        }
+
+        // 1. อัปเดต GAS
+        try {
+            await apiCall('POST', 'updateRequest', updatePayload);
+        } catch (gasErr) {
+            console.warn('GAS updateRequest failed (non-critical):', gasErr.message);
+        }
+
+        // 2. อัปเดต Firebase
+        if (typeof db !== 'undefined') {
+            const firestoreData = {
+                status: newStatus,
+                id: requestId,
+                requestId: requestId
+            };
+            if (username) firestoreData.username = username;
+            if (updatePayload.adminMemoUrl) firestoreData.adminMemoUrl = updatePayload.adminMemoUrl;
+            if (updatePayload.adminCommandUrl) firestoreData.adminCommandUrl = updatePayload.adminCommandUrl;
+            if (updatePayload.adminDispatchUrl) firestoreData.adminDispatchUrl = updatePayload.adminDispatchUrl;
+
+            try {
+                await db.collection('requests').doc(safeId).set(firestoreData, { merge: true });
+            } catch (fbErr) {
+                console.warn('Firestore update error:', fbErr.message);
+            }
+        }
+
+        showAlert('สำเร็จ', `อัปเดตสถานะ "${requestId}" เป็น "${newStatus}" เรียบร้อยแล้ว`);
+        document.getElementById('admin-direct-status-modal').style.display = 'none';
+        await fetchAllRequestsForCommand();
+
+    } catch (error) {
+        showAlert('ผิดพลาด', 'เกิดข้อผิดพลาด: ' + error.message);
+    } finally {
+        toggleLoader('admin-direct-status-submit', false);
+    }
+}
+
+// ================================================================
 
 async function deleteMemoByAdmin(memoId) {
     if (!await showConfirm("ยืนยันการลบ", `คุณแน่ใจหรือไม่ที่จะลบบันทึกข้อความเลขที่ ${memoId}?`)) return;

@@ -1258,6 +1258,53 @@
     </div>
 </div>
 
+        <!-- Modal: เปลี่ยนสถานะรายการโดยตรง (แอดมิน) -->
+        <div id="admin-direct-status-modal" class="modal">
+            <div class="modal-content">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-xl font-bold text-slate-800">🔄 เปลี่ยนสถานะรายการโดยตรง</h3>
+                    <button id="admin-direct-status-modal-close" class="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
+                </div>
+                <div id="admin-direct-status-info" class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800"></div>
+                <form id="admin-direct-status-form">
+                    <input type="hidden" id="admin-direct-request-id">
+                    <input type="hidden" id="admin-direct-username">
+                    <div class="mb-4">
+                        <label class="form-label">สถานะใหม่ <span class="text-red-500">*</span></label>
+                        <select id="admin-direct-status-select" class="form-input" required>
+                            <option value="">-- เลือกสถานะ --</option>
+                            <option value="เสร็จสิ้น/รับไฟล์ไปใช้งาน">✅ เสร็จสิ้น/รับไฟล์ไปใช้งาน</option>
+                            <option value="นำกลับไปแก้ไข">⚠️ นำกลับไปแก้ไข</option>
+                            <option value="ไม่อนุมัติ">❌ ไม่อนุมัติ</option>
+                            <option value="ยกเลิก">🚫 ยกเลิก</option>
+                        </select>
+                    </div>
+                    <div id="admin-direct-file-section" class="hidden space-y-3 p-3 bg-green-50 border border-green-200 rounded-lg mb-4">
+                        <p class="text-sm font-semibold text-green-800">📁 อัปโหลดไฟล์กลับคืนให้ผู้ใช้ (ไม่บังคับ)</p>
+                        <div>
+                            <label class="form-label text-xs">ไฟล์บันทึกข้อความ (สมบูรณ์)</label>
+                            <input type="file" id="admin-direct-memo-file" class="form-input text-sm" accept=".pdf,.doc,.docx">
+                        </div>
+                        <div>
+                            <label class="form-label text-xs">ไฟล์คำสั่ง (สมบูรณ์)</label>
+                            <input type="file" id="admin-direct-command-file" class="form-input text-sm" accept=".pdf,.doc,.docx">
+                        </div>
+                        <div>
+                            <label class="form-label text-xs">ไฟล์หนังสือส่ง</label>
+                            <input type="file" id="admin-direct-dispatch-file" class="form-input text-sm" accept=".pdf,.doc,.docx">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-3 mt-2">
+                        <button type="button" id="admin-direct-status-cancel" class="btn bg-gray-500 text-white">ยกเลิก</button>
+                        <button type="submit" id="admin-direct-status-submit" class="btn btn-primary">
+                            <div id="admin-direct-status-loader" class="loader hidden"></div>
+                            <span>บันทึกสถานะ</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div id="admin-memo-action-modal" class="modal">
             <div class="modal-content">
                 <div class="flex justify-between items-center mb-4">
@@ -1373,9 +1420,9 @@
     <script src="js/config.js?v=20260327"></script>          <script src="js/utils.js?v=20260327"></script>
     <script src="js/firebaseService.js?v=20260327"></script>  <script src="js/auth.js?v=20260327"></script>
     <script src="js/requests.js?v=20260327c"></script>
-    <script src="js/admin.js?v=20260327b"></script>
+    <script src="js/admin.js?v=20260327c"></script>
     <script src="js/stats.js?v=20260327"></script>
-    <script src="js/main.js?v=20260327"></script>
+    <script src="js/main.js?v=20260327b"></script>
 </body>
 </html>
 

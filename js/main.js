@@ -253,6 +253,19 @@ function setupEventListeners() {
     document.getElementById('admin-memo-action-form')?.addEventListener('submit', handleAdminMemoActionSubmit);
     document.getElementById('admin-memo-action-modal-close-button')?.addEventListener('click', () => document.getElementById('admin-memo-action-modal').style.display = 'none');
     document.getElementById('admin-memo-cancel-button')?.addEventListener('click', () => document.getElementById('admin-memo-action-modal').style.display = 'none');
+
+    // --- Admin Direct Status Modal ---
+    document.getElementById('admin-direct-status-modal-close')?.addEventListener('click', () => document.getElementById('admin-direct-status-modal').style.display = 'none');
+    document.getElementById('admin-direct-status-cancel')?.addEventListener('click', () => document.getElementById('admin-direct-status-modal').style.display = 'none');
+    document.getElementById('admin-direct-status-form')?.addEventListener('submit', handleAdminDirectStatusSubmit);
+    document.getElementById('admin-direct-status-select')?.addEventListener('change', function() {
+        const fileSection = document.getElementById('admin-direct-file-section');
+        if (this.value === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            fileSection.classList.remove('hidden');
+        } else {
+            fileSection.classList.add('hidden');
+        }
+    });
     
     document.getElementById('send-memo-modal-close-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
     document.getElementById('send-memo-cancel-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
