@@ -498,6 +498,20 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
         if(typeof loadAdminAnnouncementSettings === 'function') loadAdminAnnouncementSettings();
     });
 
+    document.getElementById('admin-view-archive-tab')?.addEventListener('click', (e) => {
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById('admin-requests-view').classList.add('hidden');
+        document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view').classList.remove('hidden');
+        const monthInput = document.getElementById('archive-month-select');
+        if (monthInput && !monthInput.value) {
+            const d = new Date(); d.setMonth(d.getMonth() - 1);
+            monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        }
+    });
+
     // Submit ฟอร์มประกาศ
     document.getElementById('admin-announcement-form')?.addEventListener('submit', handleSaveAnnouncement);
 

@@ -2100,3 +2100,223 @@ function openDispatchBookModal(requestId) {
     setItem(6, "กรมธรรม์");
     setItem(7, "กำหนดการ");
 }
+
+// ====== ระบบจัดเก็บถาวร (Archive to Google Drive) ======
+// ระบบนี้ถ่ายโอนไฟล์ PDF จาก Firebase Storage ไปยัง Google Drive
+// อัปเดตลิงก์ใน Firestore และ Google Sheets แล้วลบไฟล์เก่าออกจาก Storage
+
+// ฟิลด์ที่เก็บ Firebase Storage URL ในแต่ละ record
+const ARCHIVE_URL_FIELDS = [
+    'fileUrl', 'pdfUrl', 'memoPdfUrl',
+    'completedMemoUrl', 'completedCommandUrl',
+    'commandPdfUrl', 'dispatchBookUrl',
+    'adminMemoUrl', 'adminCommandUrl', 'adminDispatchUrl'
+];
+
+function isFirebaseStorageUrl(url) {
+    return url && typeof url === 'string' &&
+        (url.includes('firebasestorage.googleapis.com') || url.includes('storage.googleapis.com'));
+}
+
+async function previewArchivable() {
+    if (!checkAdminAccess()) return;
+
+    const monthInput = document.getElementById('archive-month-select').value;
+    if (!monthInput) { showAlert('ผิดพลาด', 'กรุณาเลือกเดือน/ปีที่ต้องการจัดเก็บ'); return; }
+
+    const [yearStr, monthStr] = monthInput.split('-');
+    const selectedYear = parseInt(yearStr);
+    const selectedMonth = parseInt(monthStr); // 1-12
+
+    // ตั้งชื่อโฟลเดอร์ Google Drive อัตโนมัติ
+    const folderInput = document.getElementById('archive-folder-name');
+    if (!folderInput.value) {
+        folderInput.value = `Archive_${yearStr}-${monthStr}`;
+    }
+
+    // โหลดข้อมูล requests ถ้ายังไม่มี
+    if (!allRequestsCache || allRequestsCache.length === 0) {
+        await fetchAllRequestsForCommand();
+    }
+
+    // กรองเฉพาะ records ที่ตรงกับเดือน/ปีที่เลือก
+    const targetRecords = (allRequestsCache || []).filter(req => {
+        if (!req.id) return false;
+        const parts = req.id.split('/');
+        if (parts.length >= 2) {
+            const reqYear = parseInt(parts[1]);
+            if (reqYear === selectedYear) {
+                // ตรวจเดือนจากวันที่
+                if (req.docDate) {
+                    const d = new Date(req.docDate);
+                    return (d.getFullYear() + 543) === selectedYear && (d.getMonth() + 1) === selectedMonth;
+                }
+                return true; // ถ้าไม่มีวันที่ แต่ปีตรง → รวมด้วย
+            }
+        }
+        return false;
+    });
+
+    // นับไฟล์ Firebase Storage ที่จะถ่ายโอน
+    const filesToArchive = [];
+    targetRecords.forEach(req => {
+        ARCHIVE_URL_FIELDS.forEach(field => {
+            if (isFirebaseStorageUrl(req[field])) {
+                filesToArchive.push({ requestId: req.id, field, url: req[field] });
+            }
+        });
+    });
+
+    // แสดง preview
+    const preview = document.getElementById('archive-preview');
+    const previewList = document.getElementById('archive-preview-list');
+    const previewTitle = document.getElementById('archive-preview-title');
+    const fileCount = document.getElementById('archive-file-count');
+    const startBtn = document.getElementById('archive-start-btn');
+
+    previewTitle.textContent = `พบ ${targetRecords.length} รายการ ใน ${monthStr}/${yearStr}`;
+    fileCount.textContent = `ไฟล์ Firebase Storage ที่จะถ่ายโอน: ${filesToArchive.length} ไฟล์`;
+
+    if (filesToArchive.length === 0) {
+        previewList.innerHTML = `<p class="text-center text-gray-500 py-4">ไม่พบไฟล์ Firebase Storage ในช่วงเวลานี้ (อาจถ่ายโอนไปแล้ว หรือยังไม่มีไฟล์)</p>`;
+        startBtn.classList.add('hidden');
+    } else {
+        const grouped = {};
+        filesToArchive.forEach(f => {
+            if (!grouped[f.requestId]) grouped[f.requestId] = [];
+            grouped[f.requestId].push(f.field);
+        });
+        previewList.innerHTML = Object.entries(grouped).map(([id, fields]) => `
+            <div class="flex items-center justify-between p-2 bg-white rounded border text-sm">
+                <span class="font-medium text-indigo-700">${escapeHtml(id)}</span>
+                <span class="text-gray-500 text-xs">${fields.join(', ')}</span>
+                <span class="text-amber-600 text-xs font-bold">${fields.length} ไฟล์</span>
+            </div>`).join('');
+        startBtn.classList.remove('hidden');
+
+        // เก็บ state สำหรับใช้ตอน archive
+        window._archiveQueue = filesToArchive;
+        window._archiveFolderName = folderInput.value;
+    }
+
+    preview.classList.remove('hidden');
+    document.getElementById('archive-result').classList.add('hidden');
+    document.getElementById('archive-progress').classList.add('hidden');
+}
+
+async function startArchive() {
+    if (!checkAdminAccess()) return;
+    if (!window._archiveQueue || window._archiveQueue.length === 0) {
+        showAlert('ผิดพลาด', 'ไม่พบรายการที่ต้องจัดเก็บ กรุณาตรวจสอบรายการก่อน');
+        return;
+    }
+
+    const confirmed = await showConfirm(
+        '⚠️ ยืนยันการจัดเก็บถาวร',
+        `จะถ่ายโอน ${window._archiveQueue.length} ไฟล์ไปยัง Google Drive (${window._archiveFolderName})\n\nไฟล์ใน Firebase Storage จะถูกลบหลังจากถ่ายโอนสำเร็จ\n\nดำเนินการต่อหรือไม่?`
+    );
+    if (!confirmed) return;
+
+    const queue = [...window._archiveQueue];
+    const folderName = window._archiveFolderName;
+    const total = queue.length;
+
+    document.getElementById('archive-preview').classList.add('hidden');
+    document.getElementById('archive-progress').classList.remove('hidden');
+    document.getElementById('archive-result').classList.add('hidden');
+
+    const progressBar = document.getElementById('archive-progress-bar');
+    const progressText = document.getElementById('archive-progress-text');
+    const progressLog = document.getElementById('archive-progress-log');
+
+    const logLine = (msg) => {
+        const line = document.createElement('p');
+        line.textContent = `[${new Date().toLocaleTimeString('th-TH')}] ${msg}`;
+        progressLog.appendChild(line);
+        progressLog.scrollTop = progressLog.scrollHeight;
+    };
+
+    const results = { success: [], failed: [] };
+    // จัดกลุ่มตาม requestId เพื่อส่ง GAS ครั้งเดียวต่อ record
+    const grouped = {};
+    queue.forEach(item => {
+        if (!grouped[item.requestId]) grouped[item.requestId] = {};
+        grouped[item.requestId][item.field] = item.url;
+    });
+
+    let done = 0;
+    for (const [requestId, urlMap] of Object.entries(grouped)) {
+        logLine(`กำลังถ่ายโอน: ${requestId} (${Object.keys(urlMap).length} ไฟล์)`);
+        try {
+            // 1. ส่ง GAS ให้ดาวน์โหลดไฟล์ไปยัง Google Drive
+            const gasRes = await apiCall('POST', 'archiveFilesToDrive', {
+                requestId,
+                folderName,
+                urlMap  // { fieldName: firebaseUrl, ... }
+            });
+
+            if (gasRes.status !== 'success') throw new Error(gasRes.message || 'GAS archive failed');
+
+            const newUrlMap = gasRes.data || {}; // { fieldName: driveUrl, ... }
+
+            // 2. อัปเดต Firestore ด้วย URL ใหม่
+            const safeId = requestId.replace(/[\/\\:\.\s]/g, '-');
+            if (typeof db !== 'undefined' && Object.keys(newUrlMap).length > 0) {
+                await db.collection('requests').doc(safeId).set(newUrlMap, { merge: true });
+            }
+
+            // 3. อัปเดต Google Sheets ด้วย URL ใหม่ (เฉพาะ fields ที่สำคัญ)
+            const sheetUpdate = { requestId };
+            if (newUrlMap.fileUrl) sheetUpdate.fileUrl = newUrlMap.fileUrl;
+            if (newUrlMap.pdfUrl) sheetUpdate.pdfUrl = newUrlMap.pdfUrl;
+            if (newUrlMap.completedMemoUrl) sheetUpdate.completedMemoUrl = newUrlMap.completedMemoUrl;
+            if (Object.keys(sheetUpdate).length > 1) {
+                try { await apiCall('POST', 'updateRequest', sheetUpdate); } catch (_) {}
+            }
+
+            // 4. ลบไฟล์เก่าออกจาก Firebase Storage
+            for (const [field, oldUrl] of Object.entries(urlMap)) {
+                try {
+                    if (isFirebaseStorageUrl(oldUrl) && typeof firebase !== 'undefined') {
+                        await firebase.storage().refFromURL(oldUrl).delete();
+                    }
+                } catch (delErr) {
+                    logLine(`⚠️ ลบ Storage ไม่ได้: ${field} (${delErr.message})`);
+                }
+            }
+
+            done += Object.keys(urlMap).length;
+            results.success.push({ requestId, fields: Object.keys(urlMap), newUrls: newUrlMap });
+            logLine(`✅ สำเร็จ: ${requestId}`);
+
+        } catch (err) {
+            done += Object.keys(urlMap).length;
+            results.failed.push({ requestId, error: err.message });
+            logLine(`❌ ล้มเหลว: ${requestId} — ${err.message}`);
+        }
+
+        const pct = Math.round((done / total) * 100);
+        progressBar.style.width = `${pct}%`;
+        progressText.textContent = `${done} / ${total} ไฟล์ (${pct}%)`;
+    }
+
+    // แสดงผลลัพธ์
+    document.getElementById('archive-progress').classList.add('hidden');
+    const resultBox = document.getElementById('archive-result-box');
+    const isAllOk = results.failed.length === 0;
+    resultBox.className = `p-4 rounded-xl border ${isAllOk ? 'bg-green-50 border-green-300' : 'bg-orange-50 border-orange-300'}`;
+    resultBox.innerHTML = `
+        <h4 class="font-bold ${isAllOk ? 'text-green-800' : 'text-orange-800'} mb-2">
+            ${isAllOk ? '✅ จัดเก็บเสร็จสมบูรณ์' : '⚠️ จัดเก็บเสร็จ (มีบางรายการล้มเหลว)'}
+        </h4>
+        <p class="text-sm">สำเร็จ: <strong>${results.success.length}</strong> รายการ | ล้มเหลว: <strong class="${results.failed.length > 0 ? 'text-red-600' : ''}">${results.failed.length}</strong> รายการ</p>
+        <p class="text-xs text-gray-600 mt-1">โฟลเดอร์ Google Drive: <strong>${folderName}</strong></p>
+        ${results.failed.length > 0 ? `<div class="mt-2 text-xs text-red-600">${results.failed.map(f => `❌ ${escapeHtml(f.requestId)}: ${escapeHtml(f.error)}`).join('<br>')}</div>` : ''}`;
+    document.getElementById('archive-result').classList.remove('hidden');
+
+    // ล้าง queue
+    window._archiveQueue = [];
+    window._archiveFolderName = '';
+}
+
+// ================================================================
