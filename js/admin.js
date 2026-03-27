@@ -367,10 +367,8 @@ function renderAdminRequestsList(requests) {
         const safeLocation = escapeHtml(request.location);
         const safeDate = `${formatDisplayDate(request.startDate)} - ${formatDisplayDate(request.endDate)}`;
 
-        // --- ปุ่มเปลี่ยนสถานะโดยตรง (สำหรับรายการที่ยังไม่สิ้นสุด) ---
+        // --- Badge สถานะปัจจุบัน (แสดงข้อมูลเท่านั้น) ---
         const effectiveStatus = request.status || request.memoStatus || '';
-        const isEnded = effectiveStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
-                        effectiveStatus === 'ไม่อนุมัติ' || effectiveStatus === 'ยกเลิก';
         let currentStatusBadge = '';
         if (effectiveStatus && effectiveStatus !== 'Pending') {
             const badgeColors = {
@@ -382,9 +380,6 @@ function renderAdminRequestsList(requests) {
             const badgeClass = badgeColors[effectiveStatus] || 'bg-blue-100 text-blue-700';
             currentStatusBadge = `<span class="text-xs px-2 py-0.5 rounded-full ${badgeClass}">${effectiveStatus}</span>`;
         }
-        const directStatusBtn = !isEnded
-            ? `<button onclick="openAdminDirectStatus('${safeId}')" class="btn bg-slate-600 hover:bg-slate-700 text-white btn-sm flex items-center gap-1 shadow-sm px-2">🔄 เปลี่ยนสถานะ</button>`
-            : `<span class="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 border border-emerald-200">✅ ปิดงานแล้ว</span>`;
 
         // --- ปุ่มหนังสือส่ง ---
         const dispatchUrl = request.dispatchBookUrl || request.dispatchBookPdfUrl;
@@ -481,7 +476,6 @@ function renderAdminRequestsList(requests) {
                 <div class="flex flex-col gap-2 w-full md:w-auto items-end">
                     <div class="flex flex-wrap gap-2 justify-end items-center">
                         ${userDraftPdfSection}
-                        ${directStatusBtn}
                         <button onclick="deleteRequestByAdmin('${safeId}')" class="text-xs text-red-500 hover:text-red-700 underline flex items-center gap-1">🗑️ ลบรายการ</button>
                     </div>
                     ${commandActionButtons}
@@ -1172,13 +1166,24 @@ function renderAdminMemosList(memos) {
         const safeRef = escapeHtml(memo.refNumber);
         const safeUser = escapeHtml(memo.submittedBy);
 
+        // ตรวจสอบว่ารายการปิดงานแล้วหรือยัง
+        const memoEnded = memo.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                          memo.status === 'ไม่อนุมัติ' || memo.status === 'ยกเลิก';
+
+        // ปุ่มเปลี่ยนสถานะโดยตรง — แสดงเฉพาะรายการที่ยังไม่สิ้นสุด
+        // ใช้ memo.refNumber เป็น key เพื่อ map กับ request ในระบบ
+        const safeRefForBtn = (memo.refNumber || '').replace(/'/g, "\\'");
+        const directStatusBtn = !memoEnded
+            ? `<button onclick="openAdminDirectStatus('${safeRefForBtn}')" class="btn bg-slate-600 hover:bg-slate-700 text-white btn-sm flex items-center gap-1">🔄 เปลี่ยนสถานะ</button>`
+            : '';
+
         return `
-        <div class="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition">
+        <div class="border rounded-lg p-4 bg-white shadow-sm hover:shadow-md transition ${memoEnded ? 'opacity-75' : ''}">
             <div class="flex justify-between items-start flex-wrap gap-4">
                 <div class="flex-1">
                     <h4 class="font-bold">${safeId}</h4>
                     <p class="text-sm text-gray-600">โดย: ${safeUser} | อ้างอิง: ${safeRef}</p>
-                    <p class="text-sm">สถานะ: <span class="font-medium">${translateStatus(memo.status)}</span></p>
+                    <p class="text-sm">สถานะ: <span class="font-medium ${memoEnded ? 'text-emerald-700' : 'text-orange-600'}">${translateStatus(memo.status)}</span></p>
                     <div class="mt-2 text-xs text-gray-500">
                         ${memo.completedMemoUrl ? `<div>✓ บันทึกข้อความสมบูรณ์</div>` : ''}
                         ${memo.completedCommandUrl ? `<div>✓ คำสั่งสมบูรณ์</div>` : ''}
@@ -1191,6 +1196,7 @@ function renderAdminMemosList(memos) {
                     ${memo.completedMemoUrl ? `<a href="${memo.completedMemoUrl}" target="_blank" class="btn bg-blue-500 text-white btn-sm">ดูบันทึกสมบูรณ์</a>` : ''}
                     ${memo.completedCommandUrl ? `<a href="${memo.completedCommandUrl}" target="_blank" class="btn bg-blue-500 text-white btn-sm">ดูคำสั่งสมบูรณ์</a>` : ''}
                     ${memo.dispatchBookUrl ? `<a href="${memo.dispatchBookUrl}" target="_blank" class="btn bg-purple-500 text-white btn-sm">ดูหนังสือส่ง</a>` : ''}
+                    ${directStatusBtn}
                     <button onclick="openAdminMemoAction('${safeId}')" class="btn bg-green-500 text-white btn-sm">${hasCompletedFiles ? 'จัดการไฟล์' : 'อัพโหลดไฟล์'}</button>
                 </div>
             </div>
@@ -1642,23 +1648,40 @@ async function deleteRequestByAdmin(requestId) {
 function openAdminDirectStatus(requestId) {
     if (!checkAdminAccess()) return;
 
+    // ค้นหาข้อมูลจาก requests cache ก่อน (กรณีเรียกจากแท็บคำขอ)
     const req = (allRequestsCache || []).find(r => r.id === requestId || r.requestId === requestId);
-    if (!req) { showAlert('ผิดพลาด', 'ไม่พบข้อมูลรายการ กรุณารีเฟรชหน้า'); return; }
+
+    // Fallback: ค้นหาจาก memos cache ด้วย refNumber (กรณีเรียกจากแท็บบันทึกข้อความ)
+    const memo = !req
+        ? (allMemosCache || []).find(m => m.refNumber === requestId || m.id === requestId)
+        : null;
+
+    if (!req && !memo) {
+        showAlert('ผิดพลาด', 'ไม่พบข้อมูลรายการ กรุณารีเฟรชหน้า');
+        return;
+    }
+
+    // สร้างข้อมูลสำหรับ modal
+    const displayId = requestId;
+    const displayName = req?.requesterName || memo?.submittedBy || '-';
+    const displayPurpose = req?.purpose || '-';
+    const displayStatus = req?.status || req?.memoStatus || memo?.status || 'ไม่ระบุ';
+    const username = req?.username || req?.submittedBy || memo?.submittedBy || '';
+    const memoIdNote = memo ? ` (บันทึก: ${escapeHtml(memo.id)})` : '';
 
     document.getElementById('admin-direct-request-id').value = requestId;
-    document.getElementById('admin-direct-username').value = req.username || req.submittedBy || '';
+    document.getElementById('admin-direct-username').value = username;
     document.getElementById('admin-direct-status-select').value = '';
     document.getElementById('admin-direct-file-section').classList.add('hidden');
     document.getElementById('admin-direct-memo-file').value = '';
     document.getElementById('admin-direct-command-file').value = '';
     document.getElementById('admin-direct-dispatch-file').value = '';
 
-    const currentStatus = req.status || req.memoStatus || 'ไม่ระบุ';
     document.getElementById('admin-direct-status-info').innerHTML = `
-        <strong>เลขที่:</strong> ${escapeHtml(requestId)}<br>
-        <strong>ผู้ขอ:</strong> ${escapeHtml(req.requesterName || '-')}<br>
-        <strong>เรื่อง:</strong> ${escapeHtml(req.purpose || '-')}<br>
-        <strong>สถานะปัจจุบัน:</strong> <span class="font-bold">${escapeHtml(currentStatus)}</span>`;
+        <strong>เลขที่คำขอ:</strong> ${escapeHtml(displayId)}${memoIdNote}<br>
+        <strong>ผู้ขอ/ผู้ส่ง:</strong> ${escapeHtml(displayName)}<br>
+        ${displayPurpose !== '-' ? `<strong>เรื่อง:</strong> ${escapeHtml(displayPurpose)}<br>` : ''}
+        <strong>สถานะปัจจุบัน:</strong> <span class="font-bold">${escapeHtml(displayStatus)}</span>`;
 
     document.getElementById('admin-direct-status-modal').style.display = 'flex';
 }
