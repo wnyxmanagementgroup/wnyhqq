@@ -1166,14 +1166,14 @@ function renderAdminMemosList(memos) {
         const safeRef = escapeHtml(memo.refNumber);
         const safeUser = escapeHtml(memo.submittedBy);
 
-        // ตรวจสอบว่ารายการปิดงานแล้วหรือยัง
+        // ตรวจสอบว่ารายการปิดงานแล้วหรือยัง (ตรวจทั้ง status และ memoStatus เพื่อรองรับข้อมูลเก่า GAS)
         const memoEnded = memo.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                          memo.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
                           memo.status === 'ไม่อนุมัติ' || memo.status === 'ยกเลิก';
 
-        // ปุ่มเปลี่ยนสถานะโดยตรง — แสดงเฉพาะรายการที่ยังไม่สิ้นสุด
-        // ใช้ memo.refNumber เป็น key เพื่อ map กับ request ในระบบ
+        // ปุ่มเปลี่ยนสถานะโดยตรง — แสดงเฉพาะรายการที่ยังไม่สิ้นสุดและมี refNumber
         const safeRefForBtn = (memo.refNumber || '').replace(/'/g, "\\'");
-        const directStatusBtn = !memoEnded
+        const directStatusBtn = !memoEnded && memo.refNumber
             ? `<button onclick="openAdminDirectStatus('${safeRefForBtn}')" class="btn bg-slate-600 hover:bg-slate-700 text-white btn-sm flex items-center gap-1">🔄 เปลี่ยนสถานะ</button>`
             : '';
 
@@ -2144,8 +2144,8 @@ async function previewArchivable() {
         if (!req.id) return false;
         const parts = req.id.split('/');
         if (parts.length >= 2) {
-            const reqYear = parseInt(parts[1]);
-            if (reqYear === selectedYear) {
+            const reqYear = parseInt(parts[1], 10);
+            if (!isNaN(reqYear) && reqYear === selectedYear) {
                 // ตรวจเดือนจากวันที่
                 if (req.docDate) {
                     const d = new Date(req.docDate);
