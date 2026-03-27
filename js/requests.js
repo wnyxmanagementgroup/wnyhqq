@@ -402,11 +402,17 @@ function renderUserRequests(requests) {
         // ปุ่มส่งบันทึก — แสดงจนกว่าแอดมินจะปิด (trulyClosed)
         if (needsToSend) {
             if (memoSent) {
-                // ส่งแล้ว แต่ยังไม่ถูกปิดโดยแอดมิน — แสดงปุ่มขนาดเล็กลง ไม่กระพริบ
+                // ส่งแล้ว แต่ยังไม่ถูกปิดโดยแอดมิน — ส่งใหม่ + แก้ไข
                 actionButtons += `
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-400 hover:bg-orange-500 text-white btn-sm flex items-center gap-1 shadow-sm border border-orange-300">
                     <span>📤</span> ส่งบันทึกอีกครั้ง
                 </button>`;
+                if (canEdit) {
+                    actionButtons += `
+                <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
+                    ✏️ แก้ไขบันทึก
+                </button>`;
+                }
             } else {
                 actionButtons += `
                 <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
@@ -425,12 +431,6 @@ function renderUserRequests(requests) {
                     📄 ดูบันทึก (ฉบับระบบ)
                 </a>`;
             }
-        }
-        else if (completedMemoUrl && !completedCommandUrl) {
-            actionButtons += `
-                <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
-                    ✏️ แก้ไขรายการที่ส่ง
-                </button>`;
         }
 
         // ปุ่มดูไฟล์
@@ -518,7 +518,7 @@ function renderUserRequests(requests) {
                     
                     ${canEdit ? `
                         <div class="flex gap-3 mt-1 pt-2 border-t border-gray-100 w-full justify-end">
-                            ${!isCompleted ? `<button onclick="editRequest('${safeId}')" class="text-xs text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded">✏️ แก้ไข</button>` : ''}
+                            ${!memoSent ? `<button onclick="editRequest('${safeId}')" class="text-xs text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded">✏️ แก้ไข</button>` : ''}
                             <button onclick="deleteRequest('${safeId}')" class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 bg-red-50 px-2 py-1 rounded">🗑️ ยกเลิก</button>
                         </div>` : ''
                     }
@@ -2117,10 +2117,19 @@ async function saveEditRequest() {
 
         // --- Step 3: บันทึกข้อมูล ---
         setBtnStatus('กำลังบันทึกข้อมูล...');
-        
+
         formData.fileUrl = newFileUrl;
         formData.pdfUrl = newFileUrl;
         formData.memoPdfUrl = newFileUrl;
+
+        // ตรวจสอบว่าเคยส่งบันทึกไปแล้วหรือยัง
+        // ถ้าเคยส่งแล้ว → อัปเดต completedMemoUrl ด้วย เพื่อให้แอดมินได้รับไฟล์ล่าสุด
+        const origReq = (typeof userRequestsCache !== 'undefined' ? userRequestsCache : [])
+            .find(r => r.id === formData.requestId || r.requestId === formData.requestId);
+        const hadCompletedMemo = origReq && !!origReq.completedMemoUrl;
+        if (hadCompletedMemo) {
+            formData.completedMemoUrl = newFileUrl; // แทนที่ไฟล์ที่ส่งไว้ด้วยเวอร์ชันที่แก้ไขแล้ว
+        }
 
         const result = await apiCall('POST', 'updateRequest', formData);
 
@@ -2129,13 +2138,15 @@ async function saveEditRequest() {
             if (typeof db !== 'undefined') {
                 try {
                     const docId = formData.requestId.replace(/[\/\\\:\.\s]/g, '-');
-                    await db.collection('requests').doc(docId).set({
+                    const firestoreUpdate = {
                         ...formData,
                         fileUrl: newFileUrl,
                         pdfUrl: newFileUrl,
                         memoPdfUrl: newFileUrl,
                         lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
-                    }, { merge: true });
+                    };
+                    if (hadCompletedMemo) firestoreUpdate.completedMemoUrl = newFileUrl;
+                    await db.collection('requests').doc(docId).set(firestoreUpdate, { merge: true });
                 } catch (fbErr) {
                     console.warn("⚠️ Firestore update failed (non-critical):", fbErr.message);
                 }
@@ -2150,7 +2161,9 @@ async function saveEditRequest() {
                 btn.classList.add('bg-green-600', 'hover:bg-green-700');
             }
 
-            showAlert("สำเร็จ", "บันทึกการแก้ไขเรียบร้อยแล้ว");
+            showAlert("สำเร็จ", hadCompletedMemo
+                ? "บันทึกการแก้ไขเรียบร้อยแล้ว\nไฟล์ PDF ที่ส่งไว้ถูกแทนที่ด้วยเวอร์ชันที่แก้ไขแล้วโดยอัตโนมัติ"
+                : "บันทึกการแก้ไขเรียบร้อยแล้ว");
             
             // 2. เปิดไฟล์ใหม่ให้ดูทันที (ใน Tab ใหม่)
             if (newFileUrl) window.open(newFileUrl, '_blank');
