@@ -375,8 +375,8 @@ function renderUserRequests(requests) {
         const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
         const memoSent = !!completedMemoUrl; // ใช้สำหรับแสดง badge และข้อความเท่านั้น
         const needsToSend = (hasPendingId && !trulyClosed) || isFixing;
-        // canEdit: ต้องประกาศก่อน actionButtons เพราะถูกใช้ใน if(needsToSend) block
-        const canEdit = !completedCommandUrl;
+        // canEdit: แก้ไขได้จนกว่าแอดมินจะปิดงาน (steps 1 & 2 ยังแก้ได้, step 3 ปิดแล้ว)
+        const canEdit = !trulyClosed;
         // --- 1. Badge สถานะ ---
         let statusBadge = '';
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
@@ -401,77 +401,71 @@ function renderUserRequests(requests) {
         // --- Action Buttons ---
         let actionButtons = '';
 
-        // ปุ่มส่งบันทึก — แสดงจนกว่าแอดมินจะปิด (trulyClosed)
-        if (needsToSend) {
-            if (memoSent) {
-                // ส่งแล้ว แต่ยังไม่ถูกปิดโดยแอดมิน — ส่งใหม่ + แก้ไข
-                actionButtons += `
-                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-400 hover:bg-orange-500 text-white btn-sm flex items-center gap-1 shadow-sm border border-orange-300">
-                    <span>📤</span> ส่งบันทึกอีกครั้ง
-                </button>`;
-                if (canEdit) {
-                    actionButtons += `
-                <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
-                    ✏️ แก้ไขบันทึก
-                </button>`;
-                }
-            } else {
-                actionButtons += `
-                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
-                    <span>📤</span> ส่งบันทึก/แนบไฟล์
-                </button>`;
-            }
-            // ถ้ายังไม่มีไฟล์เลย — แสดงปุ่มสร้าง PDF / ถ้ามีแล้ว — แสดงปุ่มดู
-            if (!draftMemoUrl && !memoSent) {
-                actionButtons += `
-                <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
-                    🖨️ สร้าง PDF อัตโนมัติ
-                </button>`;
-            } else {
-                actionButtons += `
-                <a href="${draftMemoUrl}" target="_blank" class="btn bg-indigo-500 hover:bg-indigo-600 text-white btn-sm flex items-center gap-1">
-                    📄 ดูบันทึก (ฉบับระบบ)
-                </a>`;
-            }
-        }
-
-        // ปุ่มดูไฟล์
         if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
-            // แสดงไฟล์สมบูรณ์: ถ้าแอดมินอัปโหลดใหม่ใช้ไฟล์นั้น ไม่งั้น fallback ไปไฟล์ระบบ
+            // ขั้นตอนที่ 3: แอดมินอัปโหลดไฟล์กลับคืนและปิดงานแล้ว
+            // แทนที่ปุ่มดูบันทึกด้วยกล่อง "รับไฟล์กลับไปใช้งาน" ครบทั้ง 3 ไฟล์
+            // ปิดปุ่มส่งบันทึกทั้งหมด
             const finalMemoUrl = adminMemoUrl || completedMemoUrl;
             const finalCommandUrl = adminCommandUrl || completedCommandUrl;
             const finalDispatchUrl = adminDispatchUrl || dispatchBookUrl;
 
-            if (finalMemoUrl) {
-                actionButtons += `
-                <a href="${finalMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
-                    📄 บันทึกข้อความ (สมบูรณ์)
-                </a>`;
-            }
-            if (finalCommandUrl) {
-                actionButtons += `
-                <a href="${finalCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
-                    📋 คำสั่ง (สมบูรณ์)
-                </a>`;
-            }
-            if (finalDispatchUrl) {
-                actionButtons += `
-                <a href="${finalDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-md">
-                    📦 หนังสือส่ง
-                </a>`;
-            }
+            const fileLinks = [];
+            if (finalMemoUrl) fileLinks.push(`
+                <a href="${finalMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-sm">📄 บันทึกข้อความ</a>`);
+            if (finalCommandUrl) fileLinks.push(`
+                <a href="${finalCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-sm">📋 คำสั่ง</a>`);
+            if (finalDispatchUrl) fileLinks.push(`
+                <a href="${finalDispatchUrl}" target="_blank" class="btn bg-purple-600 text-white hover:bg-purple-700 btn-sm flex items-center gap-1 shadow-sm">📦 หนังสือส่ง</a>`);
+
+            actionButtons = `
+            <div class="rounded-lg border-2 border-green-400 bg-green-50 p-3 w-full">
+                <p class="text-green-700 font-bold text-sm mb-2 flex items-center gap-1">✅ รับไฟล์กลับไปใช้งาน</p>
+                <div class="flex flex-col gap-2">${fileLinks.join('')}
+                </div>
+            </div>`;
         } else {
-            if (completedMemoUrl) {
-                actionButtons += `
-                <a href="${completedMemoUrl}" target="_blank" class="btn bg-blue-600 text-white hover:bg-blue-700 btn-sm flex items-center gap-1 shadow-md">
-                    📄 ดูบันทึก (ฉบับส่ง)
-                </a>`;
-            } else if (draftMemoUrl && !isCompleted) {
-                actionButtons += `
-                <a href="${draftMemoUrl}" target="_blank" class="btn bg-teal-600 text-white hover:bg-teal-700 border border-teal-200 btn-sm flex items-center gap-1 shadow-sm">
-                    📄 ดูบันทึก (ฉบับร่าง/แก้ไข)
-                </a>`;
+            // ขั้นตอนที่ 1 (สร้างบันทึก) และ 2 (แอดมินออกคำสั่งแล้ว):
+            // แสดงปุ่มส่งบันทึก + ดูบันทึก + แก้ไขบันทึก ครบทั้ง 3 ปุ่มเสมอ
+
+            // ปุ่มส่งบันทึก
+            if (needsToSend) {
+                if (memoSent) {
+                    actionButtons += `
+                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-400 hover:bg-orange-500 text-white btn-sm flex items-center gap-1 shadow-sm border border-orange-300">
+                    <span>📤</span> ส่งบันทึกอีกครั้ง
+                </button>`;
+                } else {
+                    actionButtons += `
+                <button onclick="openSendMemoFromList('${safeId}')" class="btn bg-orange-500 hover:bg-orange-600 text-white btn-sm flex items-center gap-2 shadow-lg animate-pulse border-2 border-orange-300">
+                    <span>📤</span> ส่งบันทึก/แนบไฟล์
+                </button>`;
+                }
             }
+
+            // ปุ่มดูบันทึก (ฉบับส่ง > ฉบับระบบ > สร้างใหม่)
+            const viewUrl = completedMemoUrl || draftMemoUrl;
+            if (viewUrl) {
+                const viewLabel = completedMemoUrl ? 'ดูบันทึก (ฉบับส่ง)' : 'ดูบันทึก (ฉบับระบบ)';
+                actionButtons += `
+                <a href="${viewUrl}" target="_blank" class="btn bg-indigo-500 hover:bg-indigo-600 text-white btn-sm flex items-center gap-1">
+                    📄 ${viewLabel}
+                </a>`;
+            } else {
+                actionButtons += `
+                <button onclick="regenerateMemo('${safeId}')" class="btn bg-teal-600 hover:bg-teal-700 text-white btn-sm flex items-center gap-1">
+                    🖨️ สร้าง PDF อัตโนมัติ
+                </button>`;
+            }
+
+            // ปุ่มแก้ไขบันทึก (ขั้นตอนที่ 1 และ 2 — ก่อนแอดมินปิดงาน)
+            if (canEdit) {
+                actionButtons += `
+                <button onclick="editRequest('${safeId}')" class="btn bg-yellow-500 hover:bg-yellow-600 text-white btn-sm flex items-center gap-1 shadow-md">
+                    ✏️ แก้ไขบันทึก
+                </button>`;
+            }
+
+            // แสดงไฟล์คำสั่ง/หนังสือส่งถ้าแอดมินอัปโหลดแล้ว (ขั้นตอนที่ 2)
             if (completedCommandUrl) {
                 actionButtons += `
                 <a href="${completedCommandUrl}" target="_blank" class="btn bg-green-600 text-white hover:bg-green-700 btn-sm flex items-center gap-1 shadow-md">
@@ -488,7 +482,8 @@ function renderUserRequests(requests) {
 
         // กำหนดสีขอบซ้ายตามสถานะ
         let borderClass = 'border-l-gray-300';
-        if (completedCommandUrl) borderClass = 'border-l-green-500';
+        if (req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') borderClass = 'border-l-emerald-500';
+        else if (completedCommandUrl) borderClass = 'border-l-green-500';
         else if (isCompleted) borderClass = 'border-l-blue-500';
         else if (needsToSend) borderClass = 'border-l-orange-500';
         else if (isFixing) borderClass = 'border-l-red-500';
@@ -516,7 +511,6 @@ function renderUserRequests(requests) {
                     
                     ${canEdit ? `
                         <div class="flex gap-3 mt-1 pt-2 border-t border-gray-100 w-full justify-end">
-                            ${!memoSent ? `<button onclick="editRequest('${safeId}')" class="text-xs text-indigo-500 hover:text-indigo-700 font-medium flex items-center gap-1 bg-indigo-50 px-2 py-1 rounded">✏️ แก้ไข</button>` : ''}
                             <button onclick="deleteRequest('${safeId}')" class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 bg-red-50 px-2 py-1 rounded">🗑️ ยกเลิก</button>
                         </div>` : ''
                     }
