@@ -928,13 +928,26 @@ async function handleMemoSubmitFromModal(e) {
                 setMemoStatus('กำลังรวมไฟล์ PDF...');
                 const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
 
+                const pdfFilename = `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`;
+
                 setMemoStatus('กำลังอัปโหลด...');
-
-                const uploadRes = await uploadToFirebaseStorage(mergedPdfBlob, `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`, 'application/pdf', user.username);
-
-                if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
-                if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
-                finalFileUrlForAdmin = uploadRes.url;
+                try {
+                    const uploadRes = await uploadToFirebaseStorage(mergedPdfBlob, pdfFilename, 'application/pdf', user.username);
+                    if (!uploadRes.url) throw new Error('ไม่ได้รับ URL จาก Firebase Storage');
+                    finalFileUrlForAdmin = uploadRes.url;
+                } catch (fbErr) {
+                    console.warn('Firebase Storage failed, falling back to GAS Drive:', fbErr.message);
+                    setMemoStatus('กำลังอัปโหลดผ่าน Google Drive...');
+                    const base64Data = await blobToBase64(mergedPdfBlob);
+                    const gasRes = await apiCall('POST', 'uploadGeneratedFile', {
+                        data: base64Data,
+                        filename: pdfFilename,
+                        mimeType: 'application/pdf',
+                        username: user.username
+                    });
+                    if (!gasRes || !gasRes.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จทั้ง Firebase Storage และ Google Drive');
+                    finalFileUrlForAdmin = gasRes.url;
+                }
 
             } else if (isAdmin) {
                 console.log("🛡️ Admin Bypass: ส่งบันทึกโดยไม่มีไฟล์แนบ");
