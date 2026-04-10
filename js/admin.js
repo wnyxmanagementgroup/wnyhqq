@@ -1484,10 +1484,6 @@ async function handleAdminMemoActionSubmit(e) {
                      memoStatus: status,
                      lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                  };
-                 // ★ ใช้ Firebase Storage URL ก่อน (เชื่อถือได้มากกว่า) fallback ไป GAS Drive URL
-                 if (fbMemoUrl || urls.completedMemoUrl) updateData.adminMemoUrl = fbMemoUrl || urls.completedMemoUrl;
-                 if (fbCommandUrl || urls.completedCommandUrl) updateData.adminCommandUrl = fbCommandUrl || urls.completedCommandUrl;
-                 if (fbDispatchUrl || urls.dispatchBookUrl) updateData.adminDispatchUrl = fbDispatchUrl || urls.dispatchBookUrl;
 
                  // หา refNumber และ username: ใช้ form fields ก่อน (ส่งตรงมาจาก UI)
                  // ถ้าว่าง fallback ไป allMemosCache
@@ -1495,6 +1491,27 @@ async function handleAdminMemoActionSubmit(e) {
                  const refNumber = formRefNumber || memoEntry?.refNumber || null;
                  const submittedBy = formSubmittedBy || memoEntry?.submittedBy || memoEntry?.username || null;
                  const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
+
+                 // ★ URL Priority: Firebase Storage → GAS result (รองรับทั้ง flat และ nested) → allMemosCache
+                 // allMemosCache มี completedMemoUrl/completedCommandUrl/dispatchBookUrl จาก getAllMemos
+                 // ใช้เป็น fallback สุดท้ายเพื่อกู้ URL ที่มีอยู่ใน GAS แต่ไม่ถูกคืนกลับมาใน result.data
+                 const urlsRaw = result.data?.data || result.data || {};
+                 const memoFileUrl = fbMemoUrl
+                     || urlsRaw.completedMemoUrl || urlsRaw.adminMemoUrl
+                     || memoEntry?.completedMemoUrl || memoEntry?.adminMemoUrl
+                     || null;
+                 const commandFileUrl = fbCommandUrl
+                     || urlsRaw.completedCommandUrl || urlsRaw.adminCommandUrl
+                     || memoEntry?.completedCommandUrl || memoEntry?.adminCommandUrl
+                     || null;
+                 const dispatchFileUrl = fbDispatchUrl
+                     || urlsRaw.dispatchBookUrl || urlsRaw.adminDispatchUrl
+                     || memoEntry?.dispatchBookUrl || memoEntry?.adminDispatchUrl
+                     || null;
+
+                 if (memoFileUrl) updateData.adminMemoUrl = memoFileUrl;
+                 if (commandFileUrl) updateData.adminCommandUrl = commandFileUrl;
+                 if (dispatchFileUrl) updateData.adminDispatchUrl = dispatchFileUrl;
 
                  // ใส่ username เพื่อให้ user query ด้วย where('username') เจอ document นี้
                  if (submittedBy) {
