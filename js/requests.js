@@ -344,6 +344,59 @@ async function fetchUserRequests() {
             }
         }
 
+        // ★ 2.5 ดึงไฟล์ที่แอดมินอัพโหลดจาก Firestore memos collection มาผสาน
+        // เพื่อให้ผู้ใช้เห็นไฟล์บันทึก/คำสั่ง/หนังสือส่งที่แอดมินอัพโหลดให้เสมอ
+        // ไม่ขึ้นอยู่กับว่า adminMemoUrl ถูก save ลง requests collection สำเร็จหรือไม่
+        if (typeof db !== 'undefined') {
+            try {
+                const [memosByUsername, memosBySubmittedBy] = await Promise.all([
+                    db.collection('memos').where('username', '==', user.username).get(),
+                    db.collection('memos').where('submittedBy', '==', user.username).get()
+                ]);
+
+                // รวม memos ทั้งสองผลลัพธ์ dedup โดย doc.id
+                const adminMemosById = {};
+                const collectAdminMemos = (snap) => {
+                    snap.forEach(doc => {
+                        const m = doc.data();
+                        if (m.adminMemoUrl || m.adminCommandUrl || m.adminDispatchUrl) {
+                            adminMemosById[doc.id] = { ...m, _docId: doc.id };
+                        }
+                    });
+                };
+                collectAdminMemos(memosByUsername);
+                collectAdminMemos(memosBySubmittedBy);
+
+                const adminMemosList = Object.values(adminMemosById);
+                if (adminMemosList.length > 0) {
+                    requests = requests.map(req => {
+                        if (!req.id) return req;
+                        const reqSafe = req.id.replace(/[\/\\:\.\s]/g, '-');
+                        // จับคู่ memo กับ request ผ่าน refNumber, id, requestId หรือ doc.id
+                        const matched = adminMemosList.find(m => {
+                            const candidates = [m.refNumber, m.id, m.requestId, m._docId].filter(Boolean);
+                            return candidates.some(c =>
+                                c === req.id ||
+                                c === reqSafe ||
+                                c.replace(/[\/\\:\.\s]/g, '-') === reqSafe
+                            );
+                        });
+                        if (!matched) return req;
+                        return {
+                            ...req,
+                            adminMemoUrl: matched.adminMemoUrl || req.adminMemoUrl,
+                            adminCommandUrl: matched.adminCommandUrl || req.adminCommandUrl,
+                            adminDispatchUrl: matched.adminDispatchUrl || req.adminDispatchUrl,
+                            status: matched.status || req.status,
+                            memoStatus: matched.memoStatus || req.memoStatus,
+                        };
+                    });
+                }
+            } catch (e) {
+                console.warn('Memos admin files merge error:', e);
+            }
+        }
+
         // 3. เรียงลำดับ (ใหม่ -> เก่า)
         // Firebase-only records (เพิ่งสร้าง/GAS cache ล่าช้า) ใช้ timestamp แทน docDate
         if (requests.length > 0) {

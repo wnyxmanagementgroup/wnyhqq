@@ -1509,6 +1509,40 @@ async function handleAdminMemoActionSubmit(e) {
                         await db.collection('requests').doc(safeRefId).set(updateData, { merge: true });
                     }
                  } catch (e) { console.warn("Firestore update error:", e); }
+
+                 // ★ Robust fallback: query Firestore requests by id/requestId fields
+                 // เพื่อให้แน่ใจว่า adminMemoUrl/adminCommandUrl/adminDispatchUrl
+                 // ถูก save ไปถึง user request document จริงๆ ไม่ว่า memoId จะต่างจาก requestId หรือไม่
+                 const hasAdminUrls = updateData.adminMemoUrl || updateData.adminCommandUrl || updateData.adminDispatchUrl;
+                 if (hasAdminUrls) {
+                     try {
+                         const adminFileUpdate = { status, memoStatus: status, lastUpdated: firebase.firestore.FieldValue.serverTimestamp() };
+                         if (updateData.adminMemoUrl) adminFileUpdate.adminMemoUrl = updateData.adminMemoUrl;
+                         if (updateData.adminCommandUrl) adminFileUpdate.adminCommandUrl = updateData.adminCommandUrl;
+                         if (updateData.adminDispatchUrl) adminFileUpdate.adminDispatchUrl = updateData.adminDispatchUrl;
+                         if (submittedBy) adminFileUpdate.username = submittedBy;
+
+                         const searchIds = [...new Set([refNumber, memoId].filter(Boolean))];
+                         for (const sid of searchIds) {
+                             // Query by requestId field
+                             const qByRequestId = await db.collection('requests').where('requestId', '==', sid).limit(10).get();
+                             if (!qByRequestId.empty) {
+                                 const batch = db.batch();
+                                 qByRequestId.forEach(doc => batch.set(doc.ref, adminFileUpdate, { merge: true }));
+                                 await batch.commit();
+                             }
+                             // Query by id field
+                             const qById = await db.collection('requests').where('id', '==', sid).limit(10).get();
+                             if (!qById.empty) {
+                                 const batch = db.batch();
+                                 qById.forEach(doc => batch.set(doc.ref, adminFileUpdate, { merge: true }));
+                                 await batch.commit();
+                             }
+                         }
+                     } catch (queryErr) {
+                         console.warn('Admin file URL propagation query error:', queryErr);
+                     }
+                 }
             }
 
             if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
