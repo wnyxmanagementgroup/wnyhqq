@@ -169,6 +169,9 @@ async function generatePdfFromCloudRun(templateName, data) {
 
     doc.render(renderData);
 
+    // แก้ไขการตัดคำภาษาไทยใน LibreOffice — กำหนด th-TH ก่อนส่ง Cloud Run
+    if (typeof patchDocxThaiLanguage === 'function') patchDocxThaiLanguage(doc.getZip());
+
     const docxBlob = doc.getZip().generate({
         type: "blob",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

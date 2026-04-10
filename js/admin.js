@@ -1097,6 +1097,9 @@ async function generateOfficialPDF(requestData) {
 
         doc.render(renderData);
 
+        // แก้ไขการตัดคำภาษาไทยใน LibreOffice — กำหนด th-TH ก่อนส่ง Cloud Run
+        patchDocxThaiLanguage(doc.getZip());
+
         const docxBlob = doc.getZip().generate({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 
         const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.BASE_URL : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";

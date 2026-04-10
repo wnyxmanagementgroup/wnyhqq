@@ -244,6 +244,57 @@ async function mergePDFs(mainPdfBlob, attachmentFiles = []) {
     }
 }
 
+// --- DOCX THAI LANGUAGE PATCH ---
+
+/**
+ * แก้ไขปัญหาการตัดคำภาษาไทยใน LibreOffice
+ * Patch ไฟล์ DOCX ZIP หลัง Docxtemplater.render() เพื่อกำหนด th-TH เป็นภาษาเริ่มต้น
+ * LibreOffice จะใช้ ICU Thai word segmentation แทน English space-based line-breaking
+ *
+ * @param {PizZip} docZip - ZIP object จาก doc.getZip() ของ Docxtemplater
+ */
+function patchDocxThaiLanguage(docZip) {
+    try {
+        const THAI_LANG = '<w:lang w:val="th-TH" w:eastAsia="th-TH" w:bidi="th-TH"/>';
+
+        // 1. word/styles.xml — กำหนดภาษาเริ่มต้นทั่วทั้งเอกสาร (ครอบคลุมทุก text run)
+        if (docZip.files['word/styles.xml']) {
+            let xml = docZip.files['word/styles.xml'].asText();
+
+            if (xml.includes('<w:lang ')) {
+                // แทนที่ w:lang ที่มีอยู่ทุกตัวให้เป็น th-TH
+                xml = xml.replace(/<w:lang\b[^>]*\/>/g, THAI_LANG);
+            } else if (xml.includes('</w:rPrDefault>')) {
+                // ถ้าไม่มี w:lang เลย — ฝัง Thai lang ใน rPrDefault
+                if (xml.includes('<w:rPrDefault><w:rPr>')) {
+                    xml = xml.replace('<w:rPrDefault><w:rPr>', `<w:rPrDefault><w:rPr>${THAI_LANG}`);
+                } else if (xml.includes('<w:rPrDefault/>')) {
+                    xml = xml.replace('<w:rPrDefault/>', `<w:rPrDefault><w:rPr>${THAI_LANG}</w:rPr></w:rPrDefault>`);
+                } else {
+                    xml = xml.replace('</w:rPrDefault>', `<w:rPr>${THAI_LANG}</w:rPr></w:rPrDefault>`);
+                }
+            }
+
+            docZip.file('word/styles.xml', xml);
+        }
+
+        // 2. word/settings.xml — กำหนด theme font language
+        if (docZip.files['word/settings.xml']) {
+            let xml = docZip.files['word/settings.xml'].asText();
+            if (xml.includes('<w:themeFontLang')) {
+                xml = xml.replace(/<w:themeFontLang\b[^>]*\/>/g, '<w:themeFontLang w:val="th-TH" w:eastAsia="th-TH"/>');
+            } else {
+                xml = xml.replace('</w:settings>', '<w:themeFontLang w:val="th-TH" w:eastAsia="th-TH"/></w:settings>');
+            }
+            docZip.file('word/settings.xml', xml);
+        }
+
+    } catch (patchErr) {
+        // ไม่ใช่ critical — ถ้า patch ไม่ได้ก็ยังส่ง Cloud Run ได้ตามปกติ
+        console.warn('[patchDocxThaiLanguage] Could not patch Thai language settings:', patchErr);
+    }
+}
+
 // --- FIREBASE STORAGE UPLOAD HELPER ---
 
 /**
