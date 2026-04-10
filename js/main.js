@@ -155,6 +155,33 @@ function startRealtimeNotifications() {
 
             // อัปเดต UI ทันที
             renderNotificationUI(pendingCount, pendingItems);
+
+            // ★ Auto-refresh dashboard เมื่อ admin อัปเดตสถานะหรืออัปโหลดไฟล์
+            // ตรวจสอบว่ามี document ที่ถูก "modified" (ไม่ใช่ added/removed)
+            const hasAdminUpdate = snapshot.docChanges().some(change => {
+                if (change.type !== 'modified') return false;
+                const d = change.doc.data();
+                // trigger เมื่อ status, memoStatus หรือ adminFileUrl เปลี่ยน
+                return d.adminMemoUrl || d.adminCommandUrl || d.adminDispatchUrl ||
+                       d.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       d.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       d.status === 'Approved' || d.status === 'กำลังดำเนินการ' ||
+                       d.status === 'นำกลับไปแก้ไข';
+            });
+
+            if (hasAdminUpdate) {
+                const dashPage = document.getElementById('dashboard-page');
+                const onDashboard = dashPage && !dashPage.classList.contains('hidden');
+                if (onDashboard) {
+                    // debounce กัน refresh ถี่เกิน (800ms)
+                    if (window._dashboardAutoRefreshTimer) clearTimeout(window._dashboardAutoRefreshTimer);
+                    window._dashboardAutoRefreshTimer = setTimeout(async () => {
+                        console.log('🔄 Auto-refreshing dashboard (admin update detected)...');
+                        if (typeof clearRequestsCache === 'function') clearRequestsCache();
+                        if (typeof fetchUserRequests === 'function') await fetchUserRequests();
+                    }, 800);
+                }
+            }
         }, (error) => {
             console.warn("Real-time Notification Error:", error);
         });

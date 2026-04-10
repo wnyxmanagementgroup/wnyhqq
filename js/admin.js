@@ -1457,7 +1457,11 @@ async function handleAdminMemoActionSubmit(e) {
             const safeId = memoId.replace(/[\/\\:\.]/g, '-');
 
             if (typeof db !== 'undefined') {
-                 const updateData = { status: status };
+                 const updateData = {
+                     status: status,
+                     memoStatus: status,       // ★ บันทึกทั้ง status และ memoStatus เพื่อ query ทั้งสองแบบ
+                     lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+                 };
                  // บันทึกไฟล์ที่แอดมินอัพโหลดลง field แยกต่างหาก ไม่ปะปนกับไฟล์ของผู้ใช้
                  if (urls.completedMemoUrl) updateData.adminMemoUrl = urls.completedMemoUrl;
                  if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
@@ -1756,8 +1760,10 @@ async function handleAdminDirectStatusSubmit(e) {
         if (typeof db !== 'undefined') {
             const firestoreData = {
                 status: newStatus,
+                memoStatus: newStatus,         // ★ บันทึกทั้งสองฟิลด์
                 id: requestId,
-                requestId: requestId
+                requestId: requestId,
+                lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
             };
             if (username) firestoreData.username = username;
             if (updatePayload.adminMemoUrl) firestoreData.adminMemoUrl = updatePayload.adminMemoUrl;
