@@ -1432,40 +1432,56 @@ async function handleAdminMemoActionSubmit(e) {
     const completedMemoFile = document.getElementById('admin-completed-memo-file').files[0];
     const completedCommandFile = document.getElementById('admin-completed-command-file').files[0];
     const dispatchBookFile = document.getElementById('admin-dispatch-book-file').files[0];
-    
-    let completedMemoFileObject = null; 
-    let completedCommandFileObject = null; 
-    let dispatchBookFileObject = null;
-    
-    if (completedMemoFile) completedMemoFileObject = await fileToObject(completedMemoFile);
-    if (completedCommandFile) completedCommandFileObject = await fileToObject(completedCommandFile);
-    if (dispatchBookFile) dispatchBookFileObject = await fileToObject(dispatchBookFile);
-    
+
     toggleLoader('admin-memo-submit-button', true);
-    
+
     try {
-        const result = await apiCall('POST', 'updateMemoStatus', { 
-            id: memoId, 
-            status: status, 
-            completedMemoFile: completedMemoFileObject, 
-            completedCommandFile: completedCommandFileObject, 
-            dispatchBookFile: dispatchBookFileObject 
+        const safeId = memoId.replace(/[\/\\:\.]/g, '-');
+
+        // ★ อัปโหลดไฟล์ตรงถึง Firebase Storage ก่อน (ไม่รอ GAS return URL)
+        const uploadAdminFile = async (file, prefix) => {
+            if (!file) return null;
+            try {
+                const res = await uploadToFirebaseStorage(file, `admin_${prefix}_${safeId}_${Date.now()}.pdf`, file.type, 'admin');
+                return res?.url || null;
+            } catch (err) {
+                console.warn(`Admin Firebase upload (${prefix}) failed:`, err.message);
+                return null;
+            }
+        };
+        const [fbMemoUrl, fbCommandUrl, fbDispatchUrl] = await Promise.all([
+            uploadAdminFile(completedMemoFile, 'memo'),
+            uploadAdminFile(completedCommandFile, 'command'),
+            uploadAdminFile(dispatchBookFile, 'dispatch')
+        ]);
+
+        // แปลงไฟล์เป็น base64 เพื่อส่งไป GAS (backup ใน Drive)
+        let completedMemoFileObject = null, completedCommandFileObject = null, dispatchBookFileObject = null;
+        if (completedMemoFile) completedMemoFileObject = await fileToObject(completedMemoFile);
+        if (completedCommandFile) completedCommandFileObject = await fileToObject(completedCommandFile);
+        if (dispatchBookFile) dispatchBookFileObject = await fileToObject(dispatchBookFile);
+
+        const result = await apiCall('POST', 'updateMemoStatus', {
+            id: memoId,
+            status: status,
+            completedMemoFile: completedMemoFileObject,
+            completedCommandFile: completedCommandFileObject,
+            dispatchBookFile: dispatchBookFileObject
         });
-        
+
         if (result.status === 'success') {
             const urls = result.data || {};
-            const safeId = memoId.replace(/[\/\\:\.]/g, '-');
 
             if (typeof db !== 'undefined') {
                  const updateData = {
                      status: status,
-                     memoStatus: status,       // ★ บันทึกทั้ง status และ memoStatus เพื่อ query ทั้งสองแบบ
+                     memoStatus: status,
                      lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
                  };
-                 // บันทึกไฟล์ที่แอดมินอัพโหลดลง field แยกต่างหาก ไม่ปะปนกับไฟล์ของผู้ใช้
-                 if (urls.completedMemoUrl) updateData.adminMemoUrl = urls.completedMemoUrl;
-                 if (urls.completedCommandUrl) updateData.adminCommandUrl = urls.completedCommandUrl;
-                 if (urls.dispatchBookUrl) updateData.adminDispatchUrl = urls.dispatchBookUrl;
+                 // ★ ใช้ Firebase Storage URL ก่อน (เชื่อถือได้มากกว่า) fallback ไป GAS Drive URL
+                 if (fbMemoUrl || urls.completedMemoUrl) updateData.adminMemoUrl = fbMemoUrl || urls.completedMemoUrl;
+                 if (fbCommandUrl || urls.completedCommandUrl) updateData.adminCommandUrl = fbCommandUrl || urls.completedCommandUrl;
+                 if (fbDispatchUrl || urls.dispatchBookUrl) updateData.adminDispatchUrl = fbDispatchUrl || urls.dispatchBookUrl;
 
                  // หา refNumber และ username จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
                  // (memo.id อาจ ≠ req.id ที่ผู้ใช้ใช้ fetch)

@@ -424,10 +424,20 @@ function renderUserRequests(requests) {
         const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || completedMemoUrl);
         const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
         const hasPendingId = req.id && req.id !== 'รอเลขที่';
-        // isDone: รวม status และ memoStatus เพื่อรองรับข้อมูลเก่าใน GAS ที่เก็บเป็น memoStatus
-        const isDone = req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน';
-        // ปิดปุ่มเฉพาะเมื่อแอดมินตั้งสถานะ "เสร็จสิ้น/รับไฟล์ไปใช้งาน" หรือ ไม่อนุมัติ/ยกเลิก
-        // completedMemoUrl ที่มีค่า ≠ ปิดปุ่ม (ผู้ใช้ยังส่งใหม่ได้จนกว่าแอดมินจะปิด)
+
+        // ★ hasAdminFiles: แอดมินอัปโหลดไฟล์ให้แล้ว ไม่ว่าสถานะจะเป็นอะไรก็ตาม
+        const hasAdminFiles = !!(adminMemoUrl || adminCommandUrl || adminDispatchUrl);
+
+        // isDone: ครอบคลุมทุกกรณีที่แอดมินปิดงานแล้ว (ไฟล์เก่า + ไฟล์ใหม่)
+        // - status/memoStatus = 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' — ผ่านขั้นตอนปกติ
+        // - status/memoStatus = 'เสร็จสิ้น' — แอดมินปิดงานแบบเก่า (GAS record)
+        // - hasAdminFiles — แอดมินอัปโหลดไฟล์ให้แล้ว ข้ามขั้นตอนส่งบันทึกทั้งหมด
+        const isDone = req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       req.status === 'เสร็จสิ้น' ||
+                       req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       req.memoStatus === 'เสร็จสิ้น' ||
+                       hasAdminFiles;
+
         const trulyClosed = req.status === 'ไม่อนุมัติ' || req.status === 'ยกเลิก' || isDone;
         const memoSent = !!completedMemoUrl; // ใช้สำหรับแสดง badge และข้อความเท่านั้น
         const needsToSend = (hasPendingId && !trulyClosed) || isFixing;
