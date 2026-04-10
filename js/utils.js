@@ -257,15 +257,27 @@ function patchDocxThaiLanguage(docZip) {
     try {
         const THAI_LANG = '<w:lang w:val="th-TH" w:eastAsia="th-TH" w:bidi="th-TH"/>';
 
-        // 1. word/styles.xml — กำหนดภาษาเริ่มต้นทั่วทั้งเอกสาร (ครอบคลุมทุก text run)
+        // 1. Patch ทุกไฟล์ XML ใน word/ — ครอบคลุม document.xml, styles.xml, header*, footer* ฯลฯ
+        //    สำคัญ: w:lang ใน document.xml (run-level) override ค่า default ใน styles.xml
+        //    ต้องแทนที่ทุกตัวไม่ใช่แค่ styles เท่านั้น
+        Object.keys(docZip.files)
+            .filter(fname => fname.startsWith('word/') && fname.endsWith('.xml'))
+            .forEach(fname => {
+                try {
+                    let xml = docZip.files[fname].asText();
+                    if (!xml.includes('<w:lang')) return; // ข้ามไฟล์ที่ไม่มี lang tag
+                    xml = xml.replace(/<w:lang\b[^>]*\/>/g, THAI_LANG);
+                    docZip.file(fname, xml);
+                } catch (e) {
+                    console.warn(`[patchDocxThaiLanguage] skip ${fname}:`, e.message);
+                }
+            });
+
+        // 2. word/styles.xml — ถ้าไม่มี w:lang เลยในเอกสาร ให้ฝัง Thai lang ใน rPrDefault
+        //    (กรณี template ไม่มี lang tag เลย — run จะ fallback มาใช้ค่านี้)
         if (docZip.files['word/styles.xml']) {
             let xml = docZip.files['word/styles.xml'].asText();
-
-            if (xml.includes('<w:lang ')) {
-                // แทนที่ w:lang ที่มีอยู่ทุกตัวให้เป็น th-TH
-                xml = xml.replace(/<w:lang\b[^>]*\/>/g, THAI_LANG);
-            } else if (xml.includes('</w:rPrDefault>')) {
-                // ถ้าไม่มี w:lang เลย — ฝัง Thai lang ใน rPrDefault
+            if (!xml.includes('<w:lang') && xml.includes('</w:rPrDefault>')) {
                 if (xml.includes('<w:rPrDefault><w:rPr>')) {
                     xml = xml.replace('<w:rPrDefault><w:rPr>', `<w:rPrDefault><w:rPr>${THAI_LANG}`);
                 } else if (xml.includes('<w:rPrDefault/>')) {
@@ -273,12 +285,11 @@ function patchDocxThaiLanguage(docZip) {
                 } else {
                     xml = xml.replace('</w:rPrDefault>', `<w:rPr>${THAI_LANG}</w:rPr></w:rPrDefault>`);
                 }
+                docZip.file('word/styles.xml', xml);
             }
-
-            docZip.file('word/styles.xml', xml);
         }
 
-        // 2. word/settings.xml — กำหนด theme font language
+        // 3. word/settings.xml — theme font language
         if (docZip.files['word/settings.xml']) {
             let xml = docZip.files['word/settings.xml'].asText();
             if (xml.includes('<w:themeFontLang')) {
@@ -290,7 +301,6 @@ function patchDocxThaiLanguage(docZip) {
         }
 
     } catch (patchErr) {
-        // ไม่ใช่ critical — ถ้า patch ไม่ได้ก็ยังส่ง Cloud Run ได้ตามปกติ
         console.warn('[patchDocxThaiLanguage] Could not patch Thai language settings:', patchErr);
     }
 }
