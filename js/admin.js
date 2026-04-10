@@ -1444,29 +1444,13 @@ async function handleAdminMemoActionSubmit(e) {
         const formRefNumber = document.getElementById('admin-memo-ref-number')?.value?.trim() || '';
         const formSubmittedBy = document.getElementById('admin-memo-submitted-by')?.value?.trim() || '';
 
-        // ★ อัปโหลดไฟล์ตรงถึง Firebase Storage ก่อน (ไม่รอ GAS return URL)
-        const uploadAdminFile = async (file, prefix) => {
-            if (!file) return null;
-            try {
-                const res = await uploadToFirebaseStorage(file, `admin_${prefix}_${safeId}_${Date.now()}.pdf`, file.type, 'admin');
-                return res?.url || null;
-            } catch (err) {
-                console.warn(`Admin Firebase upload (${prefix}) failed:`, err.message);
-                return null;
-            }
-        };
-        const [fbMemoUrl, fbCommandUrl, fbDispatchUrl] = await Promise.all([
-            uploadAdminFile(completedMemoFile, 'memo'),
-            uploadAdminFile(completedCommandFile, 'command'),
-            uploadAdminFile(dispatchBookFile, 'dispatch')
-        ]);
-
-        // แปลงไฟล์เป็น base64 เพื่อส่งไป GAS (backup ใน Drive)
+        // ★ แปลงไฟล์เป็น base64 เพื่อส่งไป GAS (บันทึกลง Google Drive เป็นหลัก)
         let completedMemoFileObject = null, completedCommandFileObject = null, dispatchBookFileObject = null;
         if (completedMemoFile) completedMemoFileObject = await fileToObject(completedMemoFile);
         if (completedCommandFile) completedCommandFileObject = await fileToObject(completedCommandFile);
         if (dispatchBookFile) dispatchBookFileObject = await fileToObject(dispatchBookFile);
 
+        // ★ ส่งไปยัง GAS ก่อน → Google Drive เป็นที่เก็บหลัก
         const result = await apiCall('POST', 'updateMemoStatus', {
             id: memoId,
             status: status,
@@ -1476,7 +1460,21 @@ async function handleAdminMemoActionSubmit(e) {
         });
 
         if (result.status === 'success') {
-            const urls = result.data || {};
+            const urlsRaw = result.data?.data || result.data || {};
+
+            // ★ ถ้า GAS ไม่ได้คืน URL → fallback อัปโหลดไปยัง Firebase Storage แทน
+            const getOrFallback = async (driveUrl, file, prefix) => {
+                if (driveUrl) return driveUrl;
+                if (!file) return null;
+                try {
+                    const res = await uploadToFirebaseStorage(file, `admin_${prefix}_${safeId}_${Date.now()}.pdf`, file.type, 'admin');
+                    console.warn(`Google Drive upload (${prefix}) ไม่มี URL → ใช้ Firebase Storage แทน`);
+                    return res?.url || null;
+                } catch (err) {
+                    console.warn(`Firebase Storage fallback (${prefix}) ล้มเหลว:`, err.message);
+                    return null;
+                }
+            };
 
             if (typeof db !== 'undefined') {
                  const updateData = {
@@ -1492,22 +1490,24 @@ async function handleAdminMemoActionSubmit(e) {
                  const submittedBy = formSubmittedBy || memoEntry?.submittedBy || memoEntry?.username || null;
                  const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
 
-                 // ★ URL Priority: Firebase Storage → GAS result (รองรับทั้ง flat และ nested) → allMemosCache
-                 // allMemosCache มี completedMemoUrl/completedCommandUrl/dispatchBookUrl จาก getAllMemos
-                 // ใช้เป็น fallback สุดท้ายเพื่อกู้ URL ที่มีอยู่ใน GAS แต่ไม่ถูกคืนกลับมาใน result.data
-                 const urlsRaw = result.data?.data || result.data || {};
-                 const memoFileUrl = fbMemoUrl
-                     || urlsRaw.completedMemoUrl || urlsRaw.adminMemoUrl
-                     || memoEntry?.completedMemoUrl || memoEntry?.adminMemoUrl
-                     || null;
-                 const commandFileUrl = fbCommandUrl
-                     || urlsRaw.completedCommandUrl || urlsRaw.adminCommandUrl
-                     || memoEntry?.completedCommandUrl || memoEntry?.adminCommandUrl
-                     || null;
-                 const dispatchFileUrl = fbDispatchUrl
-                     || urlsRaw.dispatchBookUrl || urlsRaw.adminDispatchUrl
-                     || memoEntry?.dispatchBookUrl || memoEntry?.adminDispatchUrl
-                     || null;
+                 // ★ URL Priority: GAS Drive result → allMemosCache → Firebase Storage fallback
+                 const [memoFileUrl, commandFileUrl, dispatchFileUrl] = await Promise.all([
+                     getOrFallback(
+                         urlsRaw.completedMemoUrl || urlsRaw.adminMemoUrl
+                         || memoEntry?.completedMemoUrl || memoEntry?.adminMemoUrl,
+                         completedMemoFile, 'memo'
+                     ),
+                     getOrFallback(
+                         urlsRaw.completedCommandUrl || urlsRaw.adminCommandUrl
+                         || memoEntry?.completedCommandUrl || memoEntry?.adminCommandUrl,
+                         completedCommandFile, 'command'
+                     ),
+                     getOrFallback(
+                         urlsRaw.dispatchBookUrl || urlsRaw.adminDispatchUrl
+                         || memoEntry?.dispatchBookUrl || memoEntry?.adminDispatchUrl,
+                         dispatchBookFile, 'dispatch'
+                     )
+                 ]);
 
                  if (memoFileUrl) updateData.adminMemoUrl = memoFileUrl;
                  if (commandFileUrl) updateData.adminCommandUrl = commandFileUrl;
@@ -2361,17 +2361,28 @@ async function startArchive() {
 
             const newUrlMap = gasRes.data || {}; // { fieldName: driveUrl, ... }
 
-            // 2. อัปเดต Firestore ด้วย URL ใหม่
+            // 2. อัปเดต Firestore requests + memos ด้วย URL ใหม่ (บันทึกคู่)
             const safeId = requestId.replace(/[\/\\:\.\s]/g, '-');
             if (typeof db !== 'undefined' && Object.keys(newUrlMap).length > 0) {
                 await db.collection('requests').doc(safeId).set(newUrlMap, { merge: true });
+                // อัปเดต memos collection ด้วย (map field ชื่อให้ตรงกับ memos schema)
+                const memosUpdate = {};
+                if (newUrlMap.adminMemoUrl || newUrlMap.completedMemoUrl)
+                    memosUpdate.completedMemoUrl = newUrlMap.adminMemoUrl || newUrlMap.completedMemoUrl;
+                if (newUrlMap.adminCommandUrl || newUrlMap.completedCommandUrl)
+                    memosUpdate.completedCommandUrl = newUrlMap.adminCommandUrl || newUrlMap.completedCommandUrl;
+                if (newUrlMap.adminDispatchUrl || newUrlMap.dispatchBookUrl)
+                    memosUpdate.dispatchBookUrl = newUrlMap.adminDispatchUrl || newUrlMap.dispatchBookUrl;
+                if (Object.keys(memosUpdate).length > 0) {
+                    try { await db.collection('memos').doc(safeId).set(memosUpdate, { merge: true }); } catch (_) {}
+                }
             }
 
-            // 3. อัปเดต Google Sheets ด้วย URL ใหม่ (เฉพาะ fields ที่สำคัญ)
+            // 3. อัปเดต Google Sheets ด้วย URL ใหม่ทุก field
             const sheetUpdate = { requestId };
-            if (newUrlMap.fileUrl) sheetUpdate.fileUrl = newUrlMap.fileUrl;
-            if (newUrlMap.pdfUrl) sheetUpdate.pdfUrl = newUrlMap.pdfUrl;
-            if (newUrlMap.completedMemoUrl) sheetUpdate.completedMemoUrl = newUrlMap.completedMemoUrl;
+            ARCHIVE_URL_FIELDS.forEach(field => {
+                if (newUrlMap[field]) sheetUpdate[field] = newUrlMap[field];
+            });
             if (Object.keys(sheetUpdate).length > 1) {
                 try { await apiCall('POST', 'updateRequest', sheetUpdate); } catch (_) {}
             }
