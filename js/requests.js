@@ -155,18 +155,24 @@ async function handleDeleteRequest(requestId) {
         });
 
         if (result.status === 'success') {
-            
-            // 2. ลบข้อมูลใน Firebase (ถ้าเปิดใช้งาน Hybrid)
-            if (typeof db !== 'undefined' && typeof USE_FIREBASE !== 'undefined' && USE_FIREBASE) {
+
+            // 2. ลบข้อมูลใน Firebase
+            if (typeof db !== 'undefined') {
                 try {
-                    // หาเอกสารที่มี requestId ตรงกันแล้วลบ
+                    // วิธีที่ 1: ลบตาม document ID (docId = requestId ที่ sanitize แล้ว)
+                    // ★ แก้บั๊ก: ก่อนหน้านี้ใช้ where('requestId') แต่ document ถูก save ด้วย 'id' field
+                    //   ทำให้ query ไม่เจอ และ Firestore record ไม่ถูกลบ
+                    const docId = requestId.replace(/[\/\\:\.\s]/g, '-');
+                    await db.collection('requests').doc(docId).delete();
+
+                    // วิธีที่ 2: ลบผ่าน query (รองรับ record เก่าที่มี requestId field ต่างหาก)
                     const query = await db.collection('requests').where('requestId', '==', requestId).get();
                     if (!query.empty) {
                         const batch = db.batch();
                         query.docs.forEach(doc => batch.delete(doc.ref));
                         await batch.commit();
-                        console.log("✅ Deleted from Firebase:", requestId);
                     }
+                    console.log("✅ Deleted from Firebase:", requestId);
                 } catch (fbError) {
                     console.warn("⚠️ Failed to delete from Firebase:", fbError);
                 }
@@ -1665,6 +1671,7 @@ async function handleRequestFormSubmit(e) {
             const firestoreData = {
                 ...formData,
                 id: realId,
+                requestId: realId,   // ★ เพิ่มเพื่อให้ where('requestId') query หาเจอตอน delete
                 status: 'Pending',
                 timestamp: firebase.firestore.FieldValue.serverTimestamp()
             };
