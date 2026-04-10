@@ -349,16 +349,9 @@ async function fetchUserRequests() {
         }
 
         // ★ 2.5 ดึงไฟล์ที่แอดมินอัพโหลดจาก Firestore memos collection มาผสาน
-        // เพื่อให้ผู้ใช้เห็นไฟล์บันทึก/คำสั่ง/หนังสือส่งที่แอดมินอัพโหลดให้เสมอ
-        // ไม่ขึ้นอยู่กับว่า adminMemoUrl ถูก save ลง requests collection สำเร็จหรือไม่
+        // ใช้หลาย query ครอบคลุมทั้งข้อมูลเก่าและใหม่
         if (typeof db !== 'undefined') {
             try {
-                const [memosByUsername, memosBySubmittedBy] = await Promise.all([
-                    db.collection('memos').where('username', '==', user.username).get(),
-                    db.collection('memos').where('submittedBy', '==', user.username).get()
-                ]);
-
-                // รวม memos ทั้งสองผลลัพธ์ dedup โดย doc.id
                 const adminMemosById = {};
                 const collectAdminMemos = (snap) => {
                     snap.forEach(doc => {
@@ -368,8 +361,30 @@ async function fetchUserRequests() {
                         }
                     });
                 };
-                collectAdminMemos(memosByUsername);
-                collectAdminMemos(memosBySubmittedBy);
+
+                // Query 1 & 2: by username/submittedBy (ข้อมูลที่ save ด้วยโค้ดใหม่)
+                const [q1, q2] = await Promise.all([
+                    db.collection('memos').where('username', '==', user.username).get(),
+                    db.collection('memos').where('submittedBy', '==', user.username).get()
+                ]);
+                collectAdminMemos(q1);
+                collectAdminMemos(q2);
+
+                // Query 3 & 4: by requestId/id field matching user's request IDs
+                // ครอบคลุมข้อมูลเก่าที่ไม่มี username แต่มี id/requestId = refNumber ที่ถูกต้อง
+                const userReqIds = [...new Set(requests.map(r => r.id).filter(Boolean))];
+                if (userReqIds.length > 0) {
+                    const batches = [];
+                    for (let i = 0; i < userReqIds.length; i += 10) {
+                        batches.push(userReqIds.slice(i, i + 10));
+                    }
+                    await Promise.all(batches.flatMap(batch => [
+                        db.collection('memos').where('requestId', 'in', batch).get()
+                            .then(collectAdminMemos).catch(() => {}),
+                        db.collection('memos').where('id', 'in', batch).get()
+                            .then(collectAdminMemos).catch(() => {})
+                    ]));
+                }
 
                 const adminMemosList = Object.values(adminMemosById);
                 if (adminMemosList.length > 0) {
