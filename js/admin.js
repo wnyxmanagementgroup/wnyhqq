@@ -1553,22 +1553,22 @@ async function handleAdminMemoActionSubmit(e) {
                          console.warn('Admin file URL propagation query error:', queryErr);
                      }
                  }
-            }
 
-            // ★ Push admin file URLs directly to GAS REQUEST record
-            // เพื่อให้ getRequestsByYear คืน adminMemoUrl/adminCommandUrl/adminDispatchUrl
-            // ให้ผู้ใช้เห็นได้ทันทีโดยไม่ต้องพึ่ง Firestore memos query
-            const targetRequestId = refNumber || memoId;
-            if (targetRequestId && (updateData.adminMemoUrl || updateData.adminCommandUrl || updateData.adminDispatchUrl)) {
-                try {
-                    const gasRequestUpdate = { requestId: targetRequestId, status, memoStatus: status };
-                    if (updateData.adminMemoUrl) gasRequestUpdate.adminMemoUrl = updateData.adminMemoUrl;
-                    if (updateData.adminCommandUrl) gasRequestUpdate.adminCommandUrl = updateData.adminCommandUrl;
-                    if (updateData.adminDispatchUrl) gasRequestUpdate.adminDispatchUrl = updateData.adminDispatchUrl;
-                    await apiCall('POST', 'updateRequest', gasRequestUpdate);
-                } catch (gasUpdateErr) {
-                    console.warn('Failed to push admin files to GAS request record:', gasUpdateErr);
-                }
+                 // ★ Push admin file URLs directly to GAS REQUEST record
+                 // เพื่อให้ getRequestsByYear คืน adminMemoUrl/adminCommandUrl/adminDispatchUrl
+                 // ให้ผู้ใช้เห็นได้ทันทีโดยไม่ต้องพึ่ง Firestore memos query
+                 const targetRequestId = refNumber || memoId;
+                 if (targetRequestId && (updateData.adminMemoUrl || updateData.adminCommandUrl || updateData.adminDispatchUrl)) {
+                     try {
+                         const gasRequestUpdate = { requestId: targetRequestId, status, memoStatus: status };
+                         if (updateData.adminMemoUrl) gasRequestUpdate.adminMemoUrl = updateData.adminMemoUrl;
+                         if (updateData.adminCommandUrl) gasRequestUpdate.adminCommandUrl = updateData.adminCommandUrl;
+                         if (updateData.adminDispatchUrl) gasRequestUpdate.adminDispatchUrl = updateData.adminDispatchUrl;
+                         await apiCall('POST', 'updateRequest', gasRequestUpdate);
+                     } catch (gasUpdateErr) {
+                         console.warn('Failed to push admin files to GAS request record:', gasUpdateErr);
+                     }
+                 }
             }
 
             if (status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
