@@ -1200,7 +1200,7 @@ function renderAdminMemosList(memos) {
                     ${memo.completedCommandUrl ? `<a href="${memo.completedCommandUrl}" target="_blank" class="btn bg-blue-500 text-white btn-sm">ดูคำสั่งสมบูรณ์</a>` : ''}
                     ${memo.dispatchBookUrl ? `<a href="${memo.dispatchBookUrl}" target="_blank" class="btn bg-purple-500 text-white btn-sm">ดูหนังสือส่ง</a>` : ''}
                     ${directStatusBtn}
-                    <button onclick="openAdminMemoAction('${safeId}')" class="btn bg-green-500 text-white btn-sm">${hasCompletedFiles ? 'จัดการไฟล์' : 'อัพโหลดไฟล์'}</button>
+                    <button onclick="openAdminMemoAction('${safeId}', '${escapeHtml(memo.refNumber || '')}', '${escapeHtml(memo.submittedBy || '')}')" class="btn bg-green-500 text-white btn-sm">${hasCompletedFiles ? 'จัดการไฟล์' : 'อัพโหลดไฟล์'}</button>
                 </div>
             </div>
         </div>`;
@@ -1393,9 +1393,11 @@ async function openDispatchModal(requestId) {
     }
 }
 
-function openAdminMemoAction(memoId) {
+function openAdminMemoAction(memoId, refNumber, submittedBy) {
     if (!checkAdminAccess()) return;
     document.getElementById('admin-memo-id').value = memoId;
+    document.getElementById('admin-memo-ref-number').value = refNumber || '';
+    document.getElementById('admin-memo-submitted-by').value = submittedBy || '';
     document.getElementById('admin-memo-action-modal').style.display = 'flex';
 }
 
@@ -1437,6 +1439,10 @@ async function handleAdminMemoActionSubmit(e) {
 
     try {
         const safeId = memoId.replace(/[\/\\:\.]/g, '-');
+        // ★ ดึง refNumber และ submittedBy จาก hidden fields ก่อน (ส่งมาจาก openAdminMemoAction)
+        // ถ้าไม่มีค่าใน form → fallback ไป allMemosCache
+        const formRefNumber = document.getElementById('admin-memo-ref-number')?.value?.trim() || '';
+        const formSubmittedBy = document.getElementById('admin-memo-submitted-by')?.value?.trim() || '';
 
         // ★ อัปโหลดไฟล์ตรงถึง Firebase Storage ก่อน (ไม่รอ GAS return URL)
         const uploadAdminFile = async (file, prefix) => {
@@ -1483,30 +1489,34 @@ async function handleAdminMemoActionSubmit(e) {
                  if (fbCommandUrl || urls.completedCommandUrl) updateData.adminCommandUrl = fbCommandUrl || urls.completedCommandUrl;
                  if (fbDispatchUrl || urls.dispatchBookUrl) updateData.adminDispatchUrl = fbDispatchUrl || urls.dispatchBookUrl;
 
-                 // หา refNumber และ username จาก cache เพื่อ save ด้วย key ทั้ง 2 แบบ
-                 // (memo.id อาจ ≠ req.id ที่ผู้ใช้ใช้ fetch)
+                 // หา refNumber และ username: ใช้ form fields ก่อน (ส่งตรงมาจาก UI)
+                 // ถ้าว่าง fallback ไป allMemosCache
                  const memoEntry = allMemosCache.find(m => m.id === memoId);
-                 const refNumber = memoEntry?.refNumber;
-                 const submittedBy = memoEntry?.submittedBy || memoEntry?.username;
+                 const refNumber = formRefNumber || memoEntry?.refNumber || null;
+                 const submittedBy = formSubmittedBy || memoEntry?.submittedBy || memoEntry?.username || null;
                  const safeRefId = refNumber ? refNumber.replace(/[\/\\:\.]/g, '-') : null;
 
-                 // ใส่ username ด้วยเสมอ เพื่อให้ user query ด้วย where('username') เจอ document นี้
-                 // (ถ้า document ถูกสร้างใหม่โดยแอดมิน จะไม่มี username → user query ไม่เจอ)
+                 // ใส่ username เพื่อให้ user query ด้วย where('username') เจอ document นี้
                  if (submittedBy) {
                      updateData.username = submittedBy;
                  }
-                 // เพิ่ม id/requestId ใน document เพื่อให้ firebaseData lookup เจอได้
+                 // เพิ่ม id/requestId เพื่อให้ firebaseData lookup เจอได้
                  if (refNumber) {
                      updateData.id = refNumber;
                      updateData.requestId = refNumber;
                  }
 
                  try {
+                    // 1. บันทึกลง memos collection เสมอ (key = memoId)
                     await db.collection('memos').doc(safeId).set(updateData, { merge: true });
-                    await db.collection('requests').doc(safeId).set(updateData, { merge: true });
-                    // save ด้วย refNumber key ด้วย เผื่อ req.id = refNumber
+                    // 2. บันทึกลง requests collection:
+                    //    - ถ้า refNumber ต่างจาก memoId → save เฉพาะ doc ของ request (safeRefId)
+                    //      ไม่ save ด้วย safeId เพราะจะสร้าง record เปล่าที่ไม่มีรายละเอียดคำขอ
+                    //    - ถ้า refNumber = memoId หรือไม่มี refNumber → save ด้วย safeId
                     if (safeRefId && safeRefId !== safeId) {
                         await db.collection('requests').doc(safeRefId).set(updateData, { merge: true });
+                    } else {
+                        await db.collection('requests').doc(safeId).set(updateData, { merge: true });
                     }
                  } catch (e) { console.warn("Firestore update error:", e); }
 

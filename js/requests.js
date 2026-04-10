@@ -289,6 +289,10 @@ async function fetchUserRequests() {
                     const reqId = data.id || data.requestId;
                     // ถ้า id ยังไม่อยู่ใน GAS list → เพิ่มเข้าไปจาก Firebase โดยตรง
                     if (reqId && !gasIdSet.has(reqId)) {
+                        // ★ ข้าม record ที่เป็นผลพลอยได้จากการ save ของแอดมิน (ไม่มี purpose/location/startDate)
+                        // เพราะจะแสดงเป็น card ว่างเปล่าโดยไม่มีข้อมูลคำขอ
+                        const hasRequestDetails = data.purpose || data.location || data.startDate || data.endDate || data.activity;
+                        if (!hasRequestDetails) return; // skip admin-artifact records
                         requests.push({ ...data, _fromFirebaseOnly: true });
                         gasIdSet.add(reqId); // กัน duplicate
                     }
