@@ -68,7 +68,7 @@ async function handleLogin(e) {
             // ... (Code เปลี่ยนหน้าจอเดิม) ...
             initializeUserSession(realUser);
             showMainApp();
-            // ...
+            setTimeout(() => { checkAndShowAnnouncement(); }, 800);
         } else {
             throw new Error(result.message || 'รหัสผ่านไม่ถูกต้อง');
         }

@@ -752,7 +752,7 @@ async function loadAdminAnnouncementSettings() {
                 preview.querySelector('img').src = displayUrl;
                 
                 // ใส่ค่าลงในช่อง URL ด้วย เพื่อให้แอดมินเห็นว่าลิงก์เดิมคืออะไร
-                document.getElementById('announcement-image-url-input').value = displayUrl;
+                document.getElementById('announcement-image-url-input').value = data.imageUrl;
             }
         }
     } catch (e) { 
@@ -787,9 +787,9 @@ async function handleSaveAnnouncement(e) {
                 imageUrl = convertToDirectLink(uploadRes.url);
             }
         } 
-        // กรณีที่ 2: ไม่ได้อัปไฟล์ใหม่ แต่มีลิงก์ในช่อง URL (ใช้ลิงก์นั้นเลย)
+        // กรณีที่ 2: ไม่ได้อัปไฟล์ใหม่ แต่มีลิงก์ในช่อง URL (เก็บ URL ต้นฉบับ — แปลงตอนแสดงผล)
         else if (urlInput.value.trim() !== '') {
-            imageUrl = convertToDirectLink(urlInput.value.trim());
+            imageUrl = urlInput.value.trim();
         }
         // กรณีที่ 3: ถ้าไม่มีทั้งคู่ ให้เป็น null (ลบรูปออก)
 
