@@ -40,10 +40,18 @@ async function switchPage(targetPageId) {
         showReminderModal();
     }
     
-    if (targetPageId === 'form-page') { 
+    if (targetPageId === 'form-page') {
         // ฟอร์มควรรอให้รีเซ็ตเสร็จก่อน เพื่อป้องกันข้อมูลค้าง
-        await resetRequestForm(); 
-        setTimeout(() => { tryAutoFillRequester(); }, 100); 
+        await resetRequestForm();
+        setTimeout(() => { tryAutoFillRequester(); }, 100);
+        // Pre-warm Cloud Run PDF engine ขณะที่ผู้ใช้กรอกฟอร์ม
+        // (fire & forget — ไม่รอ ไม่ throw ถ้าล้มเหลว)
+        try {
+            const warmupUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
+                ? PDF_ENGINE_CONFIG.BASE_URL
+                : "https://wny-pdf-engine-660310608742.asia-southeast1.run.app";
+            fetch(warmupUrl + '/health', { method: 'GET', mode: 'no-cors' }).catch(() => {});
+        } catch (_) {}
     }
     
     if (targetPageId === 'profile-page') {
@@ -147,6 +155,33 @@ function startRealtimeNotifications() {
 
             // อัปเดต UI ทันที
             renderNotificationUI(pendingCount, pendingItems);
+
+            // ★ Auto-refresh dashboard เมื่อ admin อัปเดตสถานะหรืออัปโหลดไฟล์
+            // ตรวจสอบว่ามี document ที่ถูก "modified" (ไม่ใช่ added/removed)
+            const hasAdminUpdate = snapshot.docChanges().some(change => {
+                if (change.type !== 'modified') return false;
+                const d = change.doc.data();
+                // trigger เมื่อ status, memoStatus หรือ adminFileUrl เปลี่ยน
+                return d.adminMemoUrl || d.adminCommandUrl || d.adminDispatchUrl ||
+                       d.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       d.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
+                       d.status === 'Approved' || d.status === 'กำลังดำเนินการ' ||
+                       d.status === 'นำกลับไปแก้ไข';
+            });
+
+            if (hasAdminUpdate) {
+                const dashPage = document.getElementById('dashboard-page');
+                const onDashboard = dashPage && !dashPage.classList.contains('hidden');
+                if (onDashboard) {
+                    // debounce กัน refresh ถี่เกิน (800ms)
+                    if (window._dashboardAutoRefreshTimer) clearTimeout(window._dashboardAutoRefreshTimer);
+                    window._dashboardAutoRefreshTimer = setTimeout(async () => {
+                        console.log('🔄 Auto-refreshing dashboard (admin update detected)...');
+                        if (typeof clearRequestsCache === 'function') clearRequestsCache();
+                        if (typeof fetchUserRequests === 'function') await fetchUserRequests();
+                    }, 800);
+                }
+            }
         }, (error) => {
             console.warn("Real-time Notification Error:", error);
         });
@@ -245,6 +280,19 @@ function setupEventListeners() {
     document.getElementById('admin-memo-action-form')?.addEventListener('submit', handleAdminMemoActionSubmit);
     document.getElementById('admin-memo-action-modal-close-button')?.addEventListener('click', () => document.getElementById('admin-memo-action-modal').style.display = 'none');
     document.getElementById('admin-memo-cancel-button')?.addEventListener('click', () => document.getElementById('admin-memo-action-modal').style.display = 'none');
+
+    // --- Admin Direct Status Modal ---
+    document.getElementById('admin-direct-status-modal-close')?.addEventListener('click', () => document.getElementById('admin-direct-status-modal').style.display = 'none');
+    document.getElementById('admin-direct-status-cancel')?.addEventListener('click', () => document.getElementById('admin-direct-status-modal').style.display = 'none');
+    document.getElementById('admin-direct-status-form')?.addEventListener('submit', handleAdminDirectStatusSubmit);
+    document.getElementById('admin-direct-status-select')?.addEventListener('change', function() {
+        const fileSection = document.getElementById('admin-direct-file-section');
+        if (this.value === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน') {
+            fileSection.classList.remove('hidden');
+        } else {
+            fileSection.classList.add('hidden');
+        }
+    });
     
     document.getElementById('send-memo-modal-close-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
     document.getElementById('send-memo-cancel-button')?.addEventListener('click', () => document.getElementById('send-memo-modal').style.display = 'none');
@@ -362,18 +410,22 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
     
     // --- Admin Tabs ---
     document.getElementById('admin-view-requests-tab')?.addEventListener('click', async (e) => {
-        document.getElementById('admin-view-memos-tab').classList.remove('active');
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         document.getElementById('admin-requests-view').classList.remove('hidden');
         document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         await fetchAllRequestsForCommand();
     });
-    
+
     document.getElementById('admin-view-memos-tab')?.addEventListener('click', async (e) => {
-        document.getElementById('admin-view-requests-tab').classList.remove('active');
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         document.getElementById('admin-memos-view').classList.remove('hidden');
         document.getElementById('admin-requests-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         await fetchAllMemos();
     });
 
@@ -464,17 +516,27 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
         console.error('Unhandled promise rejection:', event.reason);
     });
     document.getElementById('admin-view-announcement-tab')?.addEventListener('click', (e) => {
-        // สลับ Active Tab
         document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        
-        // สลับหน้าจอ Admin
         document.getElementById('admin-requests-view').classList.add('hidden');
         document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         document.getElementById('admin-announcement-view').classList.remove('hidden');
-        
-        // โหลดข้อมูลประกาศ
         if(typeof loadAdminAnnouncementSettings === 'function') loadAdminAnnouncementSettings();
+    });
+
+    document.getElementById('admin-view-archive-tab')?.addEventListener('click', (e) => {
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        document.getElementById('admin-requests-view').classList.add('hidden');
+        document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view').classList.remove('hidden');
+        const monthInput = document.getElementById('archive-month-select');
+        if (monthInput && !monthInput.value) {
+            const d = new Date(); d.setMonth(d.getMonth() - 1);
+            monthInput.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        }
     });
 
     // Submit ฟอร์มประกาศ
@@ -690,7 +752,7 @@ async function loadAdminAnnouncementSettings() {
                 preview.querySelector('img').src = displayUrl;
                 
                 // ใส่ค่าลงในช่อง URL ด้วย เพื่อให้แอดมินเห็นว่าลิงก์เดิมคืออะไร
-                document.getElementById('announcement-image-url-input').value = displayUrl;
+                document.getElementById('announcement-image-url-input').value = data.imageUrl;
             }
         }
     } catch (e) { 
@@ -718,23 +780,16 @@ async function handleSaveAnnouncement(e) {
         // กรณีที่ 1: มีการอัปโหลดไฟล์ใหม่ (ให้ความสำคัญสูงสุด)
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
-            const fileObj = await fileToObject(file);
-            
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: fileObj.data,
-                filename: `announcement_${Date.now()}.jpg`,
-                mimeType: file.type,
-                username: getCurrentUser().username
-            });
+            const uploadRes = await uploadToFirebaseStorage(file, `announcement_${Date.now()}.jpg`, file.type, getCurrentUser().username);
             
             if (uploadRes.status === 'success') {
                 // ได้ลิงก์มาแล้ว แปลงเป็น Direct Link ทันที
                 imageUrl = convertToDirectLink(uploadRes.url);
             }
         } 
-        // กรณีที่ 2: ไม่ได้อัปไฟล์ใหม่ แต่มีลิงก์ในช่อง URL (ใช้ลิงก์นั้นเลย)
+        // กรณีที่ 2: ไม่ได้อัปไฟล์ใหม่ แต่มีลิงก์ในช่อง URL (เก็บ URL ต้นฉบับ — แปลงตอนแสดงผล)
         else if (urlInput.value.trim() !== '') {
-            imageUrl = convertToDirectLink(urlInput.value.trim());
+            imageUrl = urlInput.value.trim();
         }
         // กรณีที่ 3: ถ้าไม่มีทั้งคู่ ให้เป็น null (ลบรูปออก)
 
@@ -900,20 +955,26 @@ async function handleMemoSubmitFromModal(e) {
                 setMemoStatus('กำลังรวมไฟล์ PDF...');
                 const mergedPdfBlob = await mergeFilesToSinglePDF(filesToMerge);
 
+                const pdfFilename = `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`;
+
                 setMemoStatus('กำลังอัปโหลด...');
-                const mergedBase64 = await blobToBase64(mergedPdfBlob);
-
-                const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                    data: mergedBase64,
-                    filename: `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`,
-                    mimeType: 'application/pdf',
-                    username: user.username,
-                    requestId: requestId
-                });
-
-                if (uploadRes.status !== 'success') throw new Error("อัปโหลดไฟล์ไม่สำเร็จ: " + (uploadRes.message || 'ไม่ทราบสาเหตุ'));
-                if (!uploadRes.url) throw new Error("อัปโหลดสำเร็จแต่ไม่ได้รับ URL ไฟล์กลับมา");
-                finalFileUrlForAdmin = uploadRes.url;
+                try {
+                    const uploadRes = await uploadToFirebaseStorage(mergedPdfBlob, pdfFilename, 'application/pdf', user.username);
+                    if (!uploadRes.url) throw new Error('ไม่ได้รับ URL จาก Firebase Storage');
+                    finalFileUrlForAdmin = uploadRes.url;
+                } catch (fbErr) {
+                    console.warn('Firebase Storage failed, falling back to GAS Drive:', fbErr.message);
+                    setMemoStatus('กำลังอัปโหลดผ่าน Google Drive...');
+                    const base64Data = await blobToBase64(mergedPdfBlob);
+                    const gasRes = await apiCall('POST', 'uploadGeneratedFile', {
+                        data: base64Data,
+                        filename: pdfFilename,
+                        mimeType: 'application/pdf',
+                        username: user.username
+                    });
+                    if (!gasRes || !gasRes.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จทั้ง Firebase Storage และ Google Drive');
+                    finalFileUrlForAdmin = gasRes.url;
+                }
 
             } else if (isAdmin) {
                 console.log("🛡️ Admin Bypass: ส่งบันทึกโดยไม่มีไฟล์แนบ");

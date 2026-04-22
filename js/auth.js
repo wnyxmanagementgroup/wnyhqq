@@ -22,13 +22,22 @@ async function handleLogin(e) {
         let firebaseUser = null;
         let userData = null;
 
-        // 1. ลอง Login Firebase
+        // 1. ลอง Login Firebase (email/password)
         try {
             if (typeof firebase !== 'undefined') {
                 const userCredential = await firebase.auth().signInWithEmailAndPassword(email, firebasePassword);
                 firebaseUser = userCredential.user;
             }
-        } catch (firebaseError) { /* ข้าม */ }
+        } catch (firebaseError) {
+            // ถ้า email/password ไม่มีใน Firebase Auth → ใช้ Anonymous Auth แทน
+            // เพื่อให้ Firebase Storage rules (request.auth != null) ผ่านได้
+            try {
+                if (typeof firebase !== 'undefined') {
+                    const anonCredential = await firebase.auth().signInAnonymously();
+                    firebaseUser = anonCredential.user;
+                }
+            } catch (anonError) { /* ข้าม */ }
+        }
 
        // 2. เรียกตรวจสอบกับ Google Sheet (Hybrid Check)
         // เพื่อดึง "ตัวตนที่แท้จริง" (Real Identity)
@@ -59,7 +68,8 @@ async function handleLogin(e) {
             // ... (Code เปลี่ยนหน้าจอเดิม) ...
             initializeUserSession(realUser);
             showMainApp();
-            // ...
+            setTimeout(() => { checkAndShowAnnouncement(); }, 800);
+            if (typeof startRealtimeNotifications === 'function') startRealtimeNotifications();
         } else {
             throw new Error(result.message || 'รหัสผ่านไม่ถูกต้อง');
         }
@@ -218,6 +228,10 @@ function handleRegister(e) {
     const password = document.getElementById('reg-password').value;
     const confirmPassword = document.getElementById('reg-confirm-password').value;
 
+    if (password.length < 6) {
+        showAlert('ผิดพลาด', 'รหัสผ่านต้องมีอย่างน้อย 6 ตัวอักษร');
+        return;
+    }
     if (password !== confirmPassword) {
         showAlert('ผิดพลาด', 'รหัสผ่านไม่ตรงกัน');
         return;
@@ -305,13 +319,7 @@ async function checkAndShowAnnouncement() {
                 const img = document.getElementById('announcement-image');
                 if (data.imageUrl) {
                     // ★★★ แก้ไขตรงนี้: แปลงลิงก์ก่อนแสดงผล ★★★
-                    let displayUrl = data.imageUrl;
-                    if (displayUrl.includes('drive.google.com') && displayUrl.includes('/d/')) {
-                        const fileId = displayUrl.split('/d/')[1].split('/')[0];
-                        displayUrl = `https://drive.google.com/uc?export=view&id=${fileId}`;
-                    }
-                    
-                    img.src = displayUrl;
+                        img.src = convertToDirectLink(data.imageUrl) || data.imageUrl;
                     img.classList.remove('hidden');
                 } else {
                     img.classList.add('hidden');
