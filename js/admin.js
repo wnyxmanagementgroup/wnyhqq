@@ -1028,8 +1028,7 @@ async function generateOfficialPDF(requestData) {
         if (requestData.doctype === 'dispatch') {
             templateFilename = 'แม่แบบหนังสือส่งใหม่.docx'; 
         } else if (requestData.doctype === 'memo') {
-            // template_memo.docx ยังไม่มีในโปรเจกต์
-            throw new Error('ไม่พบไฟล์แม่แบบบันทึกข้อความ (template_memo.docx) กรุณาเพิ่มไฟล์ก่อนใช้งาน');
+            templateFilename = 'template_memo.docx';
         } else {
             switch (requestData.templateType) {
                 case 'groupSmall': templateFilename = 'template_command_small.docx'; break;
