@@ -69,6 +69,7 @@ async function handleLogin(e) {
             initializeUserSession(realUser);
             showMainApp();
             setTimeout(() => { checkAndShowAnnouncement(); }, 800);
+            if (typeof startRealtimeNotifications === 'function') startRealtimeNotifications();
         } else {
             throw new Error(result.message || 'รหัสผ่านไม่ถูกต้อง');
         }

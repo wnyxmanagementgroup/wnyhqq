@@ -410,18 +410,22 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
     
     // --- Admin Tabs ---
     document.getElementById('admin-view-requests-tab')?.addEventListener('click', async (e) => {
-        document.getElementById('admin-view-memos-tab').classList.remove('active');
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         document.getElementById('admin-requests-view').classList.remove('hidden');
         document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         await fetchAllRequestsForCommand();
     });
-    
+
     document.getElementById('admin-view-memos-tab')?.addEventListener('click', async (e) => {
-        document.getElementById('admin-view-requests-tab').classList.remove('active');
+        document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
         document.getElementById('admin-memos-view').classList.remove('hidden');
         document.getElementById('admin-requests-view').classList.add('hidden');
+        document.getElementById('admin-announcement-view')?.classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         await fetchAllMemos();
     });
 
@@ -512,16 +516,12 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
         console.error('Unhandled promise rejection:', event.reason);
     });
     document.getElementById('admin-view-announcement-tab')?.addEventListener('click', (e) => {
-        // สลับ Active Tab
         document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active'));
         e.target.classList.add('active');
-        
-        // สลับหน้าจอ Admin
         document.getElementById('admin-requests-view').classList.add('hidden');
         document.getElementById('admin-memos-view').classList.add('hidden');
+        document.getElementById('admin-archive-view')?.classList.add('hidden');
         document.getElementById('admin-announcement-view').classList.remove('hidden');
-        
-        // โหลดข้อมูลประกาศ
         if(typeof loadAdminAnnouncementSettings === 'function') loadAdminAnnouncementSettings();
     });
 
