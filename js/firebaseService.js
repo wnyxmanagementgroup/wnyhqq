@@ -6,40 +6,9 @@ async function submitRequestWithHybrid(formData) {
     const tempId = Date.now().toString(); // ID ชั่วคราวก่อนได้เลข บค. จาก GAS
     
     try {
-        // --- 1. พยายามสร้าง PDF ผ่าน Cloud Run ก่อน ---
+        // --- 1. ข้าม Cloud Run สำหรับขั้นตอนนี้ — ให้ GAS สร้าง PDF ใน Step ถัดไป ---
+        // (template_memo.docx ยังไม่มีในโปรเจกต์ ถ้าต้องการ Cloud Run pre-generation ให้สร้างไฟล์ template ก่อน)
         let preGeneratedUrl = null;
-        try {
-            console.log("🚀 Attempting Cloud Run PDF Generation...");
-            // สมมติใช้ template_memo.docx สำหรับบันทึกข้อความ
-            const pdfBlob = await generatePdfFromCloudRun('template_memo.docx', formData);
-            
-            // [แก้ไข] เปลี่ยนจาก uploadToStorage (Firebase) เป็น uploadGeneratedFile (GAS/Drive)
-            console.log("📤 Uploading to Google Drive via GAS...");
-            
-            // แปลง Blob เป็น Base64 เพื่อส่งผ่าน API
-            const base64Data = await blobToBase64(pdfBlob);
-            const fileName = `memo_pending_${tempId}.pdf`;
-
-            // เรียก GAS ให้บันทึกไฟล์ลง Drive
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: base64Data,
-                filename: fileName,
-                mimeType: 'application/pdf',
-                username: formData.username || 'system',
-                folderType: 'temp' // (Optional) ถ้าฝั่ง GAS รองรับการแยกโฟลเดอร์
-            });
-
-            if (uploadRes.status === 'success') {
-                preGeneratedUrl = uploadRes.url;
-                console.log("✅ Drive Upload Success! File URL:", preGeneratedUrl);
-            } else {
-                throw new Error("GAS Upload Failed: " + uploadRes.message);
-            }
-
-        } catch (e) {
-            console.warn("⚠️ Cloud Run/Upload Failed, will fallback to GAS generation:", e.message);
-            // ถ้าตรงนี้พัง preGeneratedUrl จะเป็น null ซึ่งจะไปเปิด Trigger ให้ GAS สร้างเองใน Step ถัดไป
-        }
 
         // --- 2. ส่งข้อมูลไปที่ GAS เพื่อบันทึกเลขที่ (ID) และลง Google Sheet ---
         // ส่ง preGeneratedUrl (ที่เป็นลิงก์ Drive) ไปด้วย
@@ -102,16 +71,9 @@ async function generateCommandHybrid(data) {
 
             const finalPdfBlob = await generatePdfFromCloudRun(templateName, data);
             
-            // [แก้ไข] เปลี่ยนจาก uploadToStorage เป็น uploadGeneratedFile (Drive)
             const filename = `command_${docId}_${Date.now()}.pdf`;
-            const base64Data = await blobToBase64(finalPdfBlob);
-            
-            const uploadRes = await apiCall('POST', 'uploadGeneratedFile', {
-                data: base64Data,
-                filename: filename,
-                mimeType: 'application/pdf',
-                username: data.username || 'admin'
-            });
+
+            const uploadRes = await uploadToFirebaseStorage(finalPdfBlob, filename, 'application/pdf', data.username || 'admin');
 
             if (uploadRes.status === 'success') {
                 cloudRunUrl = uploadRes.url;
@@ -186,14 +148,13 @@ async function generatePdfFromCloudRun(templateName, data) {
 
     doc.render(renderData);
 
+    // แก้ไขการตัดคำภาษาไทยใน LibreOffice — กำหนด th-TH ก่อนส่ง Cloud Run
+    if (typeof patchDocxThaiLanguage === 'function') patchDocxThaiLanguage(doc.getZip());
+
     const docxBlob = doc.getZip().generate({
         type: "blob",
         mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     });
-
-    // ส่งไปที่ Cloud Run เพื่อแปลงเป็น PDF
-    const formPayload = new FormData();
-    formPayload.append("files", docxBlob, "document.docx");
 
     const cloudRunBaseUrl = (typeof PDF_ENGINE_CONFIG !== 'undefined')
         ? PDF_ENGINE_CONFIG.BASE_URL
@@ -201,14 +162,17 @@ async function generatePdfFromCloudRun(templateName, data) {
     const timeout = (typeof PDF_ENGINE_CONFIG !== 'undefined') ? PDF_ENGINE_CONFIG.TIMEOUT : 60000;
 
     // Retry loop (2 ครั้ง) — รองรับ Cloud Run cold start และสัญญาณมือถือไม่เสถียร
+    // สำคัญ: สร้าง FormData ใหม่ในแต่ละ attempt เพราะ iOS Safari จะ consume body หลัง abort
     let cloudRunResponse, lastErr;
     for (let attempt = 0; attempt < 2; attempt++) {
         const controller = new AbortController();
         const tid = setTimeout(() => controller.abort(), timeout);
+        const attemptPayload = new FormData();
+        attemptPayload.append("files", docxBlob, "document.docx");
         try {
             cloudRunResponse = await fetch(`${cloudRunBaseUrl}/forms/libreoffice/convert`, {
                 method: "POST",
-                body: formPayload,
+                body: attemptPayload,
                 signal: controller.signal
             });
             clearTimeout(tid);
@@ -230,15 +194,4 @@ async function generatePdfFromCloudRun(templateName, data) {
     return await cloudRunResponse.blob();
 }
 
-// Helper Function: แปลง Blob เป็น Base64 (เผื่อในไฟล์นี้ยังไม่มี)
-function blobToBase64(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        const base64String = reader.result.split(',')[1]; 
-        resolve(base64String);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
+// blobToBase64 อยู่ใน utils.js แล้ว
