@@ -256,7 +256,17 @@ function setupEventListeners() {
     document.getElementById('public-attendee-modal-close-btn2')?.addEventListener('click', () => { document.getElementById('public-attendee-modal').style.display = 'none'; });
     
     document.querySelectorAll('.modal').forEach(modal => { 
-        modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; }); 
+        modal.addEventListener('click', (e) => {
+            if (e.target !== modal) return;
+
+            // ป้องกันการปิด modal "ส่งบันทึก" กลางคันตอนกำลังอัปโหลด/บันทึก
+            if (modal.id === 'send-memo-modal') {
+                const sendMemoForm = document.getElementById('send-memo-form');
+                if (sendMemoForm?.dataset.submitting === 'true') return;
+            }
+
+            modal.style.display = 'none';
+        }); 
     });
     
     document.getElementById('register-modal-close-button')?.addEventListener('click', () => document.getElementById('register-modal').style.display = 'none');
@@ -904,6 +914,8 @@ async function handleMemoSubmitFromModal(e) {
     e.preventDefault();
     const user = getCurrentUser();
     if (!user) return;
+    const sendMemoForm = document.getElementById('send-memo-form');
+    if (sendMemoForm?.dataset.submitting === 'true') return;
 
     // ตรวจสอบสิทธิ์ Admin
     const isAdmin = user.role === 'admin';
@@ -914,6 +926,7 @@ async function handleMemoSubmitFromModal(e) {
     const memoTypeInput = document.querySelector('input[name="modal_memo_type"]:checked');
     const memoType = memoTypeInput ? memoTypeInput.value : 'non_reimburse'; 
     
+    if (sendMemoForm) sendMemoForm.dataset.submitting = 'true';
     toggleLoader('send-memo-submit-button', true);
 
     // ล็อกปุ่มยกเลิก/ปิด modal กันการกดซ้ำหรือปิดกลางคัน
@@ -1035,6 +1048,7 @@ async function handleMemoSubmitFromModal(e) {
         setMemoStatus('ยืนยันการส่งบันทึก');
         if (cancelBtn) cancelBtn.disabled = false;
         if (closeBtn) closeBtn.disabled = false;
+        if (sendMemoForm) sendMemoForm.dataset.submitting = 'false';
     }
 }
 // ในไฟล์ js/main.js
