@@ -30,7 +30,7 @@ async function handleLogin(e) {
             }
         } catch (firebaseError) {
             // ถ้า email/password ไม่มีใน Firebase Auth → ใช้ Anonymous Auth แทน
-            // เพื่อให้ Firebase Storage rules (request.auth != null) ผ่านได้
+            // เพื่อให้ session ฝั่ง Firebase ยังพร้อมสำหรับ Firestore/งานประกอบอื่น
             try {
                 if (typeof firebase !== 'undefined') {
                     const anonCredential = await firebase.auth().signInAnonymously();
@@ -69,7 +69,6 @@ async function handleLogin(e) {
             initializeUserSession(realUser);
             showMainApp();
             setTimeout(() => { checkAndShowAnnouncement(); }, 800);
-            if (typeof startRealtimeNotifications === 'function') startRealtimeNotifications();
         } else {
             throw new Error(result.message || 'รหัสผ่านไม่ถูกต้อง');
         }
@@ -82,6 +81,7 @@ async function handleLogin(e) {
     }
 }
 function handleLogout() {
+    if (typeof stopRealtimeNotifications === 'function') stopRealtimeNotifications();
     sessionStorage.removeItem('currentUser');
     window.currentUser = null;
     window.location.reload();

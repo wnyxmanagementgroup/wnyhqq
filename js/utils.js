@@ -164,11 +164,6 @@ function clearRequestsCache() {
     userRequestsCache = [];
 }
 
-function checkAdminAccess() {
-    const user = getCurrentUser();
-    return user && user.role === 'admin';
-}
-
 async function loadSpecialPositions() {
     return new Promise(resolve => {
         console.log('Special positions loaded:', Object.keys(specialPositionMap).length);
@@ -242,4 +237,100 @@ async function mergePDFs(mainPdfBlob, attachmentFiles = []) {
         // ถ้า error ให้คืนค่าไฟล์หลักเดิมไปแทน (กันระบบพัง)
         return mainPdfBlob;
     }
+}
+
+// --- DOCX THAI LANGUAGE PATCH ---
+
+/**
+ * แก้ไขปัญหาการตัดคำภาษาไทยใน LibreOffice
+ * Patch ไฟล์ DOCX ZIP หลัง Docxtemplater.render() เพื่อกำหนด th-TH เป็นภาษาเริ่มต้น
+ * LibreOffice จะใช้ ICU Thai word segmentation แทน English space-based line-breaking
+ *
+ * @param {PizZip} docZip - ZIP object จาก doc.getZip() ของ Docxtemplater
+ */
+function patchDocxThaiLanguage(docZip) {
+    try {
+        const THAI_LANG = '<w:lang w:val="th-TH" w:eastAsia="th-TH" w:bidi="th-TH"/>';
+
+        // 1. Patch ทุกไฟล์ XML ใน word/ — ครอบคลุม document.xml, styles.xml, header*, footer* ฯลฯ
+        //    สำคัญ: w:lang ใน document.xml (run-level) override ค่า default ใน styles.xml
+        //    ต้องแทนที่ทุกตัวไม่ใช่แค่ styles เท่านั้น
+        Object.keys(docZip.files)
+            .filter(fname => fname.startsWith('word/') && fname.endsWith('.xml'))
+            .forEach(fname => {
+                try {
+                    let xml = docZip.files[fname].asText();
+                    if (!xml.includes('<w:lang')) return; // ข้ามไฟล์ที่ไม่มี lang tag
+                    xml = xml.replace(/<w:lang\b[^>]*\/>/g, THAI_LANG);
+                    docZip.file(fname, xml);
+                } catch (e) {
+                    console.warn(`[patchDocxThaiLanguage] skip ${fname}:`, e.message);
+                }
+            });
+
+        // 2. word/styles.xml — ถ้าไม่มี w:lang เลยในเอกสาร ให้ฝัง Thai lang ใน rPrDefault
+        //    (กรณี template ไม่มี lang tag เลย — run จะ fallback มาใช้ค่านี้)
+        if (docZip.files['word/styles.xml']) {
+            let xml = docZip.files['word/styles.xml'].asText();
+            if (!xml.includes('<w:lang') && xml.includes('</w:rPrDefault>')) {
+                if (xml.includes('<w:rPrDefault><w:rPr>')) {
+                    xml = xml.replace('<w:rPrDefault><w:rPr>', `<w:rPrDefault><w:rPr>${THAI_LANG}`);
+                } else if (xml.includes('<w:rPrDefault/>')) {
+                    xml = xml.replace('<w:rPrDefault/>', `<w:rPrDefault><w:rPr>${THAI_LANG}</w:rPr></w:rPrDefault>`);
+                } else {
+                    xml = xml.replace('</w:rPrDefault>', `<w:rPr>${THAI_LANG}</w:rPr></w:rPrDefault>`);
+                }
+                docZip.file('word/styles.xml', xml);
+            }
+        }
+
+        // 3. word/settings.xml — theme font language
+        if (docZip.files['word/settings.xml']) {
+            let xml = docZip.files['word/settings.xml'].asText();
+            if (xml.includes('<w:themeFontLang')) {
+                xml = xml.replace(/<w:themeFontLang\b[^>]*\/>/g, '<w:themeFontLang w:val="th-TH" w:eastAsia="th-TH"/>');
+            } else {
+                xml = xml.replace('</w:settings>', '<w:themeFontLang w:val="th-TH" w:eastAsia="th-TH"/></w:settings>');
+            }
+            docZip.file('word/settings.xml', xml);
+        }
+
+    } catch (patchErr) {
+        console.warn('[patchDocxThaiLanguage] Could not patch Thai language settings:', patchErr);
+    }
+}
+
+// --- GOOGLE DRIVE UPLOAD HELPER ---
+
+/**
+ * อัปโหลดไฟล์ (Blob/File) ขึ้น Google Drive ผ่าน GAS
+ * @param {Blob|File} blob - ไฟล์ที่ต้องการอัปโหลด
+ * @param {string} filename - ชื่อไฟล์
+ * @param {string} mimeType - ประเภทไฟล์ (เช่น 'application/pdf')
+ * @param {string} username - ชื่อผู้ใช้ (ใช้จัดโฟลเดอร์)
+ * @returns {Promise<{status: string, url: string}>}
+ */
+async function uploadFileToDrive(blob, filename, mimeType, username) {
+    if (!blob) {
+        throw new Error('ไม่พบไฟล์สำหรับอัปโหลด');
+    }
+
+    const safeName = (filename || `upload_${Date.now()}`)
+        .replace(/[#\[\]*?]/g, '-')
+        .replace(/\s+/g, '_');
+
+    const base64Data = await blobToBase64(blob);
+    const result = await apiCall('POST', 'uploadGeneratedFile', {
+        data: base64Data,
+        filename: safeName,
+        mimeType: mimeType || blob.type || 'application/octet-stream',
+        username: username || 'system'
+    });
+
+    const url = result?.url || result?.data?.url || result?.fileUrl || result?.data?.fileUrl;
+    if (!url) {
+        throw new Error(result?.message || 'อัปโหลดไป Google Drive ไม่สำเร็จ');
+    }
+
+    return { status: 'success', url };
 }
