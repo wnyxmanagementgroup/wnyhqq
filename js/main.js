@@ -112,122 +112,18 @@ function setupVehicleOptions() {
 }
 // [เพิ่มฟังก์ชัน Real-time Notification]
 function startRealtimeNotifications() {
-    const user = getCurrentUser();
-    if (!user || typeof db === 'undefined') return;
+    stopRealtimeNotifications();
+}
 
-    // ถ้าเคยฟังอยู่แล้ว ให้ยกเลิกก่อนกันซ้ำ
+function stopRealtimeNotifications() {
     if (notificationUnsubscribe) {
         notificationUnsubscribe();
+        notificationUnsubscribe = null;
     }
-
-    console.log("🔔 Starting Real-time Notification Listener...");
-
-    // ใช้ onSnapshot เพื่อฟังการเปลี่ยนแปลงข้อมูลแบบทันที
-    notificationUnsubscribe = db.collection('requests')
-        .where('username', '==', user.username)
-        .onSnapshot((snapshot) => {
-            let pendingCount = 0;
-            let pendingItems = [];
-
-            // วนลูปเช็คเอกสารทุกตัวที่มีการเปลี่ยนแปลง
-            snapshot.forEach((doc) => {
-                const req = doc.data();
-                const reqId = req.requestId || req.id;
-                
-                // Logic เดียวกับ updateNotifications เดิม
-                const hasCreated = (req.pdfUrl && req.pdfUrl !== '') || req.completedMemoUrl;
-                
-                // ตรวจสอบสถานะว่าเสร็จสิ้นหรือยัง
-                const isCompleted = (req.status === 'เสร็จสิ้น' || req.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' || req.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน');
-                const isFixing = (req.status === 'นำกลับไปแก้ไข' || req.memoStatus === 'นำกลับไปแก้ไข');
-                
-                // ถ้าสร้างไฟล์แล้ว แต่ยังไม่เสร็จ หรือต้องแก้ไข -> นับเป็น pending
-                if (hasCreated && (!isCompleted || isFixing)) {
-                    pendingCount++;
-                    pendingItems.push({
-                        id: reqId,
-                        purpose: req.purpose,
-                        startDate: req.startDate,
-                        isFix: isFixing
-                    });
-                }
-            });
-
-            // อัปเดต UI ทันที
-            renderNotificationUI(pendingCount, pendingItems);
-
-            // ★ Auto-refresh dashboard เมื่อ admin อัปเดตสถานะหรืออัปโหลดไฟล์
-            // ตรวจสอบว่ามี document ที่ถูก "modified" (ไม่ใช่ added/removed)
-            const hasAdminUpdate = snapshot.docChanges().some(change => {
-                if (change.type !== 'modified') return false;
-                const d = change.doc.data();
-                // trigger เมื่อ status, memoStatus หรือ adminFileUrl เปลี่ยน
-                return d.adminMemoUrl || d.adminCommandUrl || d.adminDispatchUrl ||
-                       d.status === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
-                       d.memoStatus === 'เสร็จสิ้น/รับไฟล์ไปใช้งาน' ||
-                       d.status === 'Approved' || d.status === 'กำลังดำเนินการ' ||
-                       d.status === 'นำกลับไปแก้ไข';
-            });
-
-            if (hasAdminUpdate) {
-                const dashPage = document.getElementById('dashboard-page');
-                const onDashboard = dashPage && !dashPage.classList.contains('hidden');
-                if (onDashboard) {
-                    // debounce กัน refresh ถี่เกิน (800ms)
-                    if (window._dashboardAutoRefreshTimer) clearTimeout(window._dashboardAutoRefreshTimer);
-                    window._dashboardAutoRefreshTimer = setTimeout(async () => {
-                        console.log('🔄 Auto-refreshing dashboard (admin update detected)...');
-                        if (typeof clearRequestsCache === 'function') clearRequestsCache();
-                        if (typeof fetchUserRequests === 'function') await fetchUserRequests();
-                    }, 800);
-                }
-            }
-        }, (error) => {
-            console.warn("Real-time Notification Error:", error);
-        });
 }
 
 function renderNotificationUI(count, items) {
-    const badge = document.getElementById('notification-badge');
-    const countText = document.getElementById('notification-count-text');
-    const listContainer = document.getElementById('notification-list');
-
-    if (!badge) return;
-
-    // Badge จุดแดง
-    if (count > 0) {
-        badge.textContent = count;
-        badge.classList.remove('hidden');
-        badge.classList.add('animate-bounce');
-        setTimeout(() => badge.classList.remove('animate-bounce'), 1000);
-    } else {
-        badge.classList.add('hidden');
-    }
-
-    if (countText) countText.textContent = `${count} รายการ`;
-
-    // Dropdown List
-    if (count === 0) {
-        listContainer.innerHTML = `<div class="p-8 text-center text-gray-400 flex flex-col items-center"><svg class="w-8 h-8 mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>ส่งครบทุกรายการแล้ว</div>`;
-    } else {
-        listContainer.innerHTML = items.map(item => {
-            const statusBadge = item.isFix 
-                ? `<span class="text-xs bg-red-100 text-red-600 px-1.5 rounded border border-red-200">แก้ไข</span>` 
-                : `<span class="text-xs bg-yellow-100 text-yellow-600 px-1.5 rounded border border-yellow-200">รอส่ง</span>`;
-            
-            return `
-            <div onclick="openSendMemoFromNotif('${item.id}')" class="p-3 hover:bg-indigo-50 cursor-pointer transition flex justify-between items-start group border-b border-gray-50 last:border-0">
-                <div>
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="font-bold text-sm text-indigo-700">${escapeHtml(item.id || 'รอเลข')}</span>
-                        ${statusBadge}
-                    </div>
-                    <p class="text-xs text-gray-500 line-clamp-1">${escapeHtml(item.purpose)}</p>
-                </div>
-                <div class="text-indigo-400 opacity-0 group-hover:opacity-100 transition transform translate-x-[-5px] group-hover:translate-x-0">➤</div>
-            </div>`;
-        }).join('');
-    }
+    return;
 }
 function setupEventListeners() {
     if (typeof setupFormConditions === 'function') setupFormConditions();
@@ -463,25 +359,6 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
         });
     }
 
-    // --- [NEW] NOTIFICATION BELL (กระดิ่งแจ้งเตือน) ---
-    const notifBtn = document.getElementById('notification-btn');
-    const notifDropdown = document.getElementById('notification-dropdown');
-
-    if (notifBtn && notifDropdown) {
-        // กดปุ่มกระดิ่ง -> เปิด/ปิด Dropdown
-        notifBtn.addEventListener('click', (e) => {
-            e.stopPropagation(); // กันไม่ให้ไปโดน event คลิกพื้นหลัง
-            notifDropdown.classList.toggle('hidden');
-        });
-
-        // คลิกที่อื่น -> ปิด Dropdown
-        document.addEventListener('click', (e) => {
-            if (!notifBtn.contains(e.target) && !notifDropdown.contains(e.target)) {
-                notifDropdown.classList.add('hidden');
-            }
-        });
-    }
-
     // --- [NEW] PROMPT SEND MEMO MODAL (แจ้งเตือนส่งงานทันทีหลังสร้าง) ---
     const promptModal = document.getElementById('prompt-send-memo-modal');
     const closePrompt = () => { if(promptModal) promptModal.style.display = 'none'; };
@@ -542,11 +419,6 @@ document.querySelectorAll('input[name="modal_memo_type"]').forEach(radio => radi
     // Submit ฟอร์มประกาศ
     document.getElementById('admin-announcement-form')?.addEventListener('submit', handleSaveAnnouncement);
 
-    // เริ่มต้นระบบแจ้งเตือน (ถ้า User Login อยู่แล้ว)
-    const currentUser = getCurrentUser();
-    if (currentUser) {
-        startRealtimeNotifications();
-    }
 }
 
 function handleExcelImport(e) {
@@ -780,7 +652,7 @@ async function handleSaveAnnouncement(e) {
         // กรณีที่ 1: มีการอัปโหลดไฟล์ใหม่ (ให้ความสำคัญสูงสุด)
         if (fileInput.files.length > 0) {
             const file = fileInput.files[0];
-            const uploadRes = await uploadToFirebaseStorage(file, `announcement_${Date.now()}.jpg`, file.type, getCurrentUser().username);
+            const uploadRes = await uploadFileToDrive(file, `announcement_${Date.now()}.jpg`, file.type, getCurrentUser().username);
             
             if (uploadRes.status === 'success') {
                 // ได้ลิงก์มาแล้ว แปลงเป็น Direct Link ทันที
@@ -957,24 +829,10 @@ async function handleMemoSubmitFromModal(e) {
 
                 const pdfFilename = `Complete_Memo_${requestId.replace(/[\/\\:\.\s]/g, '-')}.pdf`;
 
-                setMemoStatus('กำลังอัปโหลด...');
-                try {
-                    const uploadRes = await uploadToFirebaseStorage(mergedPdfBlob, pdfFilename, 'application/pdf', user.username);
-                    if (!uploadRes.url) throw new Error('ไม่ได้รับ URL จาก Firebase Storage');
-                    finalFileUrlForAdmin = uploadRes.url;
-                } catch (fbErr) {
-                    console.warn('Firebase Storage failed, falling back to GAS Drive:', fbErr.message);
-                    setMemoStatus('กำลังอัปโหลดผ่าน Google Drive...');
-                    const base64Data = await blobToBase64(mergedPdfBlob);
-                    const gasRes = await apiCall('POST', 'uploadGeneratedFile', {
-                        data: base64Data,
-                        filename: pdfFilename,
-                        mimeType: 'application/pdf',
-                        username: user.username
-                    });
-                    if (!gasRes || !gasRes.url) throw new Error('อัปโหลดไฟล์ไม่สำเร็จทั้ง Firebase Storage และ Google Drive');
-                    finalFileUrlForAdmin = gasRes.url;
-                }
+                setMemoStatus('กำลังอัปโหลดผ่าน Google Drive...');
+                const uploadRes = await uploadFileToDrive(mergedPdfBlob, pdfFilename, 'application/pdf', user.username);
+                if (!uploadRes.url) throw new Error('ไม่ได้รับ URL จาก Google Drive');
+                finalFileUrlForAdmin = uploadRes.url;
 
             } else if (isAdmin) {
                 console.log("🛡️ Admin Bypass: ส่งบันทึกโดยไม่มีไฟล์แนบ");
@@ -1040,43 +898,26 @@ async function handleMemoSubmitFromModal(e) {
 // ในไฟล์ js/main.js
 
 function updateSidebarForRole(user) {
-    // รายการ ID ของเมนู User ทั่วไป
-    const userMenus = ['nav-dashboard', 'nav-create-request', 'nav-create-memo'];
-    // รายการ ID ของเมนู Admin
-    const adminMenus = ['nav-admin-panel'];
+    const isAdmin = String(user?.role || '').toLowerCase() === 'admin';
+    const userMenusToHideForAdmin = ['user-nav-dashboard', 'user-nav-form', 'nav-send-memo'];
+    const adminMenus = ['admin-nav-command', 'admin-nav-users'];
+    const adminActions = document.getElementById('admin-actions');
 
-    if (user.username === 'admin') {
-        // --- กรณีเป็น Admin ---
-        // 1. ซ่อนเมนู User
-        userMenus.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
+    userMenusToHideForAdmin.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle('hidden', isAdmin);
+    });
 
-        // 2. แสดงเมนู Admin
-        adminMenus.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'block'; // หรือ 'flex' แล้วแต่ CSS
-        });
+    adminMenus.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle('hidden', !isAdmin);
+    });
 
-        // 3. บังคับเปลี่ยนหน้าไปที่หน้า Admin ทันที
-        switchPage('command-generation-page');
-
-    } else {
-        // --- กรณีเป็น User ทั่วไป ---
-        // 1. แสดงเมนู User
-        userMenus.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'block';
-        });
-
-        // 2. ซ่อนเมนู Admin
-        adminMenus.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.style.display = 'none';
-        });
-
-        // 3. ไปหน้า Dashboard
-        switchPage('dashboard-page');
+    if (adminActions) {
+        adminActions.classList.toggle('hidden', !isAdmin);
     }
+
+    switchPage(isAdmin ? 'command-generation-page' : 'dashboard-page');
 }
