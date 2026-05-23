@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>แจ้งย้ายเว็บไซต์ | ระบบไปราชการ โรงเรียนวังน้ำเย็นวิทยาคม</title>
+    
+    <!-- Meta tag สำหรับการเปลี่ยนเส้นทางอัตโนมัติภายใน 5 วินาที -->
+    <meta http-equiv="refresh" content="5;url=https://wnyhq.krukong.site/">
+    
+    <!-- นำเข้า Tailwind CSS เพื่อจัดการ Layout และความสวยงาม -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- นำเข้าฟอนต์ Prompt จาก Google Fonts ให้ดูทันสมัยและเป็นทางการ -->
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body {
+            font-family: 'Prompt', sans-serif;
+            /* พื้นหลังสีเทาอมฟ้าอ่อนๆ ให้ความรู้สึกสบายตา */
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4ebf5 100%);
+        }
+        
+        /* โทนสีประจำโรงเรียนวังน้ำเย็นวิทยาคม (น้ำเงิน-ชมพู) */
+        .text-school-blue { color: #1e3a8a; } /* น้ำเงินเข้ม */
+        .bg-school-blue { background-color: #1e3a8a; }
+        .text-school-pink { color: #ec4899; } /* ชมพู */
+        .bg-school-pink { background-color: #ec4899; }
+        .hover-bg-school-pink:hover { background-color: #be185d; }
+
+        .card-shell {
+            backdrop-filter: blur(6px);
+        }
+
+        .logo-frame {
+            background: radial-gradient(circle at top, rgba(255,255,255,0.98), rgba(239,246,255,0.95));
+            box-shadow: 0 18px 35px rgba(30, 58, 138, 0.12);
+        }
+        
+        /* เอฟเฟกต์กระเพื่อมสำหรับปุ่มกด */
+        .pulse {
+            animation: pulse-animation 2s infinite;
+        }
+        @keyframes pulse-animation {
+            0% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0.6); }
+            70% { box-shadow: 0 0 0 15px rgba(236, 72, 153, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(236, 72, 153, 0); }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <!-- ครอบเนื้อหาทั้งหมดด้วยแท็ก <a> เพื่อให้กดตรงไหนก็สามารถไปยังเว็บไซต์ใหม่ได้ -->
+    <a href="https://wnyhq.krukong.site/" class="card-shell block max-w-lg w-full bg-white/95 rounded-2xl shadow-2xl overflow-hidden transition-transform transform hover:-translate-y-2 duration-300 cursor-pointer text-center no-underline text-gray-800">
+        
+        <!-- แถบสีด้านบนสุดของ Card (น้ำเงิน-ชมพู) -->
+        <div class="h-3 w-full flex">
+            <div class="bg-school-blue w-1/2"></div>
+            <div class="bg-school-pink w-1/2"></div>
+        </div>
+        
+        <div class="p-8 sm:p-12 flex flex-col items-center">
+            <!-- โลโก้โรงเรียน -->
+            <div class="logo-frame rounded-full p-4 mb-6 border border-blue-100">
+                <img src="wny_logo.png" alt="โลโก้โรงเรียนวังน้ำเย็นวิทยาคม" class="h-24 w-24 sm:h-28 sm:w-28 object-contain">
+            </div>
+            
+            <!-- ข้อความหลัก -->
+            <h1 class="text-2xl sm:text-3xl font-bold text-school-blue mb-2">แจ้งเปลี่ยนเว็บไซต์</h1>
+            <h2 class="text-lg sm:text-xl font-semibold text-gray-700 mb-6">ระบบไปราชการ โรงเรียนวังน้ำเย็นวิทยาคม</h2>
+            
+            <p class="text-gray-500 mb-6 text-sm sm:text-base leading-relaxed">
+                ระบบได้ทำการย้ายไปที่เว็บไซต์ใหม่เรียบร้อยแล้ว<br>
+                เพื่อความสะดวกและรวดเร็ว กรุณาบันทึกบุ๊กมาร์ก (Bookmark) ใหม่
+            </p>
+            
+            <!-- กล่องแสดง URL ใหม่ -->
+            <div class="bg-gray-50 rounded-lg py-4 px-4 w-full mb-8 border border-gray-200 flex items-center justify-center space-x-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-gray-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fill-rule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0 1 1 0 00-1.414 1.414 4 4 0 005.656 0l3-3a4 4 0 00-5.656-5.656l-1.5 1.5a1 1 0 101.414 1.414l1.5-1.5zm-5 5a2 2 0 012.828 0 1 1 0 101.414-1.414 4 4 0 00-5.656 0l-3 3a4 4 0 105.656 5.656l1.5-1.5a1 1 0 10-1.414-1.414l-1.5 1.5a2 2 0 11-2.828-2.828l3-3z" clip-rule="evenodd" />
+                </svg>
+                <span class="font-semibold text-school-pink text-sm sm:text-base truncate">https://wnyhq.krukong.site/</span>
+            </div>
+            
+            <!-- ปุ่มกดไปยังเว็บใหม่ -->
+            <button class="bg-school-pink text-white font-medium py-3 px-8 rounded-full shadow-lg pulse hover-bg-school-pink transition-colors w-full sm:w-auto">
+                คลิกเพื่อเข้าสู่เว็บไซต์ใหม่
+            </button>
+            
+            <!-- ข้อความนับถอยหลัง -->
+            <p class="mt-8 text-xs sm:text-sm text-gray-400">
+                ระบบจะนำท่านไปยังเว็บไซต์ใหม่โดยอัตโนมัติใน <span id="countdown" class="font-bold text-gray-600">5</span> วินาที...
+            </p>
+        </div>
+    </a>
+
+    <!-- สคริปต์นับถอยหลัง -->
+    <script>
+        let timeLeft = 5;
+        const countdownElement = document.getElementById('countdown');
+        
+        const countdownTimer = setInterval(() => {
+            timeLeft--;
+            countdownElement.textContent = timeLeft;
+            
+            if (timeLeft <= 0) {
+                clearInterval(countdownTimer);
+                // เปลี่ยนหน้าต่างเมื่อเวลาหมด
+                window.location.href = "https://wnyhq.krukong.site/";
+            }
+        }, 1000);
+    </script>
+</body>
+</html>
